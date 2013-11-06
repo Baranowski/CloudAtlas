@@ -12,6 +12,20 @@ wordChars = ['a'..'z'] ++ ['A'..'Z'] ++ "_" ++ ['0'..'9']
 reservedKeywords =
     [ "SELECT"
     , "AS"
+    , "OR"
+    , "AND"
+    , "NOT"
+    , "REGEXP"
+    , "TRUE"
+    , "FALSE"
+    , "WHERE"
+    , "ORDER"
+    , "BY"
+    , "ASC"
+    , "DESC"
+    , "NULLS"
+    , "FIRST"
+    , "LAST"
     ]
 
 mylex p = do
