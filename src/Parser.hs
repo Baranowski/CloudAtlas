@@ -58,11 +58,9 @@ selListParser = selItemParser `sepBy` (char ',' >> spaces)
 selItemParser :: MyParser st Qsel
 selItemParser = 
     sel_expr <- mylex eParser
-    mbe_as <- (try ( do
+    mbe_as <- mylex $ optionMaybe $ try $ do
         mylex $ keyword "AS"
-        i <- mylex idParser
-        return $ Just i )
-     <|> return Nothing)
+        idParser
     return Qsel sel_expr mbe_as
 
 {---------------------}
@@ -185,13 +183,40 @@ eListParser = (mylex eParser) `sepBy` (mylex $ char ',')
 {- EXPRESSIONS END -}
 {-------------------}
 
+whereParser = do
+    mylex $ keyword "WHERE"
+    mylex eParser
+orderParser = do
+    mylex $ keyword "ORDER BY"
+    (mylex orderItemParser) `sepBy` (mylex $ char ',')
+orderItemParser = do
+    e <- mylex eParser
+    ordM <- mylex $ optionMaybe (
+            (try $ keyword "ASC" >> return Oasc)
+            <|> (try $ keyword "DESC" >> returrn Odesc)
+            )
+    nullM <- mylex $ optionMaybe (
+             (try $ keyword "NULLS FIRST" >> return Onfirst)
+             <|> ( try $ keyword "NULLS LAST" >> return Onlast)
+             )
+    let ord = case ordM of
+                Nothing -> Oasc
+                Just x -> x
+    let null = case nullM of
+                Nothing -> Onlast
+                Just x -> x
+    return $ Qorder e ord null
+    
 queryParser :: MyParser st QAT
 queryParser = do
     mylex $ keyword "SELECT"
     sel_list <- mylex $ selListParser
     mbe_where <- mylex $ optionMaybe $ try whereParser
     mbe_order <- mylex $ optionMaybe $ try orderParser
-    return $ QAT sel_list mbe_where mbe_order
+    let order = case mbe_order of
+                    Nothing -> []
+                    Just xs -> xs
+    return $ QAT sel_list mbe_where orders
 
 parse :: String -> Either ParseError [(String, QAT)]
 parse qText = P.parse topParser "(stdin)" qText
