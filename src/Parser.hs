@@ -56,7 +56,7 @@ namedQueryParser = do
 selListParser = selItemParser `sepBy` (char ',' >> spaces)
 
 selItemParser :: MyParser st Qsel
-selItemParser = 
+selItemParser = do
     sel_expr <- mylex eParser
     mbe_as <- mylex $ optionMaybe $ try $ do
         mylex $ keyword "AS"
@@ -67,13 +67,13 @@ selItemParser =
 {- EXPRESSIONS BEGIN -}
 {---------------------}
 
--- exprAbs[A]Parser nextParser opParserL constr
+-- eAbs[A]Parser nextParser opParserL constr
 -- Use nextParser to parse sequence of expressions, separated by operators
 -- recognized by members of opParserL.
 -- Assumption: every operator parser returns a constant value
 
 -- When there is only one operator parser, we can ignore its value
-exprAbsParser nextParser [opParser] constr = do
+eAbsParser nextParser [opParser] constr = do
     eL <- (mylex nextParser) `sepBy1` (mylex opParser)
     case eL of
         [e] -> return e
@@ -81,7 +81,7 @@ exprAbsParser nextParser [opParser] constr = do
 
 -- When there are more operator parsers, the result will be more complex:
 -- We associate an operator with every expression except for the first one
-exprAbsAParser nextParser opParserL constr = do
+eAbsAParser nextParser opParserL constr = do
     eFirst <- mylex nextParser
     eL <- many $ do
         op <- mylex $ choice opParserL
@@ -99,7 +99,7 @@ eNotParser = try ( do
     mylex $ keyword "NOT"
     e <- eNotParser
     return (Enot e) ) <|> eRelParser
-exprRelParser = do
+eRelParser = do
     e1 <- mylex eAddParser
     opMbe <- mylex $ optionMaybe $ choice [
         try $ string "<=" >> return Rle,
@@ -119,10 +119,10 @@ exprRelParser = do
         Just op -> do
             e2 <- mylex eAddParser
             return $ Erel op e1 e2
-eAddParser = exprAbsAParser eMulParser [
+eAddParser = eAbsAParser eMulParser [
     (char '+') >> return OpAdd,
     (char '-') >> return OpSub] Eadd
-eMulParser = exprAbsAParser eUnaryParser [
+eMulParser = eAbsAParser eUnaryParser [
     (char '*') >> return OpMul,
     (char '/') >> return OpDiv,
     (char '%') >> return OpMod ] Emul
@@ -173,6 +173,11 @@ eFloatParser = do
     char '.'
     Eint i2 <- eIntParser
     return $ Efloat (i1 + (i2 + 0.0)/(denom i2))
+    where
+      denom x = denom' x 10
+      denom' x y = if y > x
+                    then y
+                    else denom' x (y*10)
 eIntParser = do
     str <- many1 (oneOf ['0'..'9'])
     let i = (read str) :: Int
@@ -193,7 +198,7 @@ orderItemParser = do
     e <- mylex eParser
     ordM <- mylex $ optionMaybe (
             (try $ keyword "ASC" >> return Oasc)
-            <|> (try $ keyword "DESC" >> returrn Odesc)
+            <|> (try $ keyword "DESC" >> return Odesc)
             )
     nullM <- mylex $ optionMaybe (
              (try $ keyword "NULLS FIRST" >> return Onfirst)
@@ -213,7 +218,7 @@ queryParser = do
     sel_list <- mylex $ selListParser
     mbe_where <- mylex $ optionMaybe $ try whereParser
     mbe_order <- mylex $ optionMaybe $ try orderParser
-    let order = case mbe_order of
+    let orders = case mbe_order of
                     Nothing -> []
                     Just xs -> xs
     return $ QAT sel_list mbe_where orders
