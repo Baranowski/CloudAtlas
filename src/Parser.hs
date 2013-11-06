@@ -61,7 +61,7 @@ selItemParser = do
     mbe_as <- mylex $ optionMaybe $ try $ do
         mylex $ keyword "AS"
         idParser
-    return Qsel sel_expr mbe_as
+    return $ Qsel sel_expr mbe_as
 
 {---------------------}
 {- EXPRESSIONS BEGIN -}
@@ -114,7 +114,7 @@ eRelParser = do
             case rexpMbe of
                 Nothing -> return e1
                 Just _ -> do
-                    str <- mylex eStrParser
+                    Estr str <- mylex eStrParser
                     return $ Erexp e1 str
         Just op -> do
             e2 <- mylex eAddParser
@@ -148,7 +148,7 @@ eBasicParser =
         mylex $ char '<'
         res <- mylex eListParser
         char '>'
-        return Elist res
+        return $ Elist res
     <|> try (string "{}" >> return Ebraces)
     <|> try (string "[]" >> return Esquare)
     <|> ( do
@@ -167,12 +167,12 @@ eStrParser = do
     char '"'
     str <- many (noneOf "\\\"" <|> (char '\\' >> anyChar))
     char '"'
-    return Estr str
+    return $ Estr str
 eFloatParser = do
     Eint i1 <- eIntParser
     char '.'
     Eint i2 <- eIntParser
-    return $ Efloat (i1 + (i2 + 0.0)/(denom i2))
+    return $ Efloat ((fromIntegral i1) + (fromIntegral i2)/(fromIntegral $ denom i2))
     where
       denom x = denom' x 10
       denom' x y = if y > x
