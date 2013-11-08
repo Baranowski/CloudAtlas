@@ -67,15 +67,17 @@ namedQueryParser = do
     q <- queryParser
     return ('&':n, q)
 
-selListParser = selItemParser `sepBy` (char ',' >> spaces)
+selListParser = selItemParser `sepBy` (mylex $ char ',')
+selAnonListParser = selAnonItemParser `sepBy` (mylex $ char ',')
+
+selAnonItemParser = eParser
 
 selItemParser :: MyParser st Qsel
 selItemParser = do
     sel_expr <- mylex eParser
-    mbe_as <- mylex $ optionMaybe $ try $ do
-        mylex $ keyword "AS"
-        idParser
-    return $ Qsel sel_expr mbe_as
+    mylex $ keyword "AS"
+    as <- idParser
+    return $ Qsel sel_expr as
 
 {---------------------}
 {- EXPRESSIONS BEGIN -}
@@ -153,7 +155,7 @@ eBasicParser =
     <|> try (keyword "FALSE" >> return Efalse)
     <|> ( do
         mylex $ char '('
-        res <- (try queryParser >>= return . Equery) <|> eParser
+        res <- (try nestedParser >>= return . Equery) <|> eParser
         spaces
         char ')'
         return res
@@ -236,6 +238,19 @@ queryParser = do
                     Nothing -> []
                     Just xs -> xs
     return $ QAT sel_list mbe_where orders
+
+absQParser selsParser qConstr = do
+    mylex $ keyword "SELECT"
+    sel_list <- mylex $ selsParser
+    mbe_where <- mylex $ optionMaybe $ try whereParser
+    mbe_order <- mylex $ optionMaybe $ try orderParser
+    let orders = case mbe_order of
+                    Nothing -> []
+                    Just xs -> xs
+    return $ qConstr sel_list mbe_where orders
+
+nestedParser :: MyParser st Qnested
+nestedParser = absQParser selAnonListParser Qnested
 
 parse :: String -> Either ParseError [(String, QAT)]
 parse qText = P.parse topParser "(stdin)" qText

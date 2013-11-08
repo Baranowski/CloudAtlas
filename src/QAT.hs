@@ -4,8 +4,12 @@ data QAT =
     QAT [Qsel] (Maybe Qexpr) [Qorder]
     deriving (Show)
 
+data Qnested =
+    Qnested [Qexpr] (Maybe Qexpr) [Qorder]
+    deriving (Show)
+
 data Qsel =
-    Qsel Qexpr (Maybe String)
+    Qsel Qexpr String
     deriving (Show)
 
 data Qorder =
@@ -27,7 +31,7 @@ data Qexpr = Eor [Qexpr]
            | Eneg Qexpr
            | Etrue
            | Efalse
-           | Equery QAT
+           | Equery Qnested
            | Estr String
            | Efloat Double
            | Eint Int
@@ -49,4 +53,3 @@ data CmpRel = Rle
             | Req
             | Rne
     deriving (Show)
-

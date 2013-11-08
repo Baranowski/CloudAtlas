@@ -1,1 +1,1 @@
-&sel1: SELECT a, b WHERE a(c+2*1.7, TRUE) > b ORDER BY a ASC, b DESC NULLS FIRST
+&sel1: SELECT a AS a, b AS b WHERE a(c+2*1.7, TRUE) > b ORDER BY a ASC, b DESC NULLS FIRST
