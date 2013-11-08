@@ -228,16 +228,6 @@ orderItemParser = do
                 Just x -> x
     return $ Qorder e ord null
     
-queryParser :: MyParser st QAT
-queryParser = do
-    mylex $ keyword "SELECT"
-    sel_list <- mylex $ selListParser
-    mbe_where <- mylex $ optionMaybe $ try whereParser
-    mbe_order <- mylex $ optionMaybe $ try orderParser
-    let orders = case mbe_order of
-                    Nothing -> []
-                    Just xs -> xs
-    return $ QAT sel_list mbe_where orders
 
 absQParser selsParser qConstr = do
     mylex $ keyword "SELECT"
@@ -251,6 +241,9 @@ absQParser selsParser qConstr = do
 
 nestedParser :: MyParser st Qnested
 nestedParser = absQParser selAnonListParser Qnested
+
+queryParser :: MyParser st QAT
+queryParser = absQParser selListParser QAT
 
 parse :: String -> Either ParseError [(String, QAT)]
 parse qText = P.parse topParser "(stdin)" qText
