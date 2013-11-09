@@ -15,8 +15,11 @@ panic msg = do
 
 myself = ["uw", "violet07"]
 
-installQueries qList (Zone attribs children) myself@(h:x:xs) = 
-    Zone newAttribs newChildren
+installQueries qList z@(Zone attribs children) myself = 
+    case myself of
+        h:x:xs -> Zone newAttribs newChildren
+        h:xs -> Zone newAttribs children
+        _ -> z
     where
     newAttribs = attribs `M.union` (M.fromList (queriesToAttribs qList))
     newChildren = map (installInChosen qList myself) children
@@ -27,13 +30,10 @@ installQueries qList (Zone attribs children) myself@(h:x:xs) =
             then installQueries qList z (x:xs)
             else z
 
-installQueries qList zones _ = zones
-
 installAndPerform qList zones myself =
     performQueries (installQueries qList zones myself)
 
 performQueries = id
-printAttribs = show
 
 main = do
     qText <- getContents
@@ -41,5 +41,5 @@ main = do
         Left err -> panic (show err) >> return []
         Right qList -> return qList
     let newZones = installAndPerform qList zones myself 
-    putStrLn $ printAttribs newZones
+    putStr $ printAttribs newZones
 
