@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Zones where
 
 import qualified Data.Map as M
@@ -15,27 +16,13 @@ data Attribute
     = Aint (Maybe Int)
     | Astr (Maybe String)
     | Atime (Maybe UTCTime)
-    | Aset Int Type (Maybe [Attribute])
-    | Alist Int Type (Maybe [Attribute])
-    | Atuple Int (Maybe [Attribute])
+    | Aset Int (Maybe [Attribute])
+    | Alist Int (Maybe [Attribute])
     | Abool (Maybe Bool)
     | Aquery (Maybe QAT)
     | Acontact (Maybe String)
     | Aduration (Maybe String) -- TODO
     | Afloat (Maybe Double)
-    deriving (Show, Eq)
-
-data Type
-    = Tint
-    | Tstr
-    | Ttime
-    | Tset Type
-    | Tlist Type
-    | Ttuple [Type]
-    | Tbool
-    | Tquery
-    | Tcontact
-    | Tduration
     deriving (Show, Eq)
 
 time_format = "%Y/%m/%d %H:%M:%S%Q"
@@ -62,25 +49,53 @@ printAttribs zone = go [] zone
 
 printNamedAttrib (name, attr) = "    " ++ name ++ (printAttrib attr) ++ "\n"
 
-printMb Nothing = "NULL"
-printMb (Just x) = myPrint x
+class MyShow a where
+    myshow :: a -> String
+instance MyShow Int where
+    myshow x = show x
+instance MyShow String where
+    myshow x = show x
+instance MyShow UTCTime where
+    myshow x = formatTime defaultTimeLocale time_format x
+instance MyShow Bool where
+    myshow True = "TRUE"
+    myshow False = "FALSE"
+instance MyShow Double where
+    myshow x = show x
+instance MyShow QAT where
+    myshow x = show x
+
+pMb Nothing = "NULL"
+pMb (Just x) = myshow x
 
 printAttrib attr = " : " ++ (printAType attr) ++ " = " ++ (printAVal attr)
-printAVal _ = ""
+printAVal (Aint x) = pMb x
+printAVal (Astr x) = pMb x
+printAVal (Atime x) = pMb x
+printAVal (Abool x) = pMb x
+printAVal (Aquery x) = pMb x
+printAVal (Acontact x) = pMb x
+printAVal (Aduration x) = pMb x
+printAVal (Afloat x) = pMb x
+printAVal (Aset _ (Just xs)) = "{" ++
+    (concatMap ((++", ") . printAVal) xs) ++ "}"
+printAVal (Alist _ (Just xs)) = "[" ++
+    (concatMap ((++", ") . printAVal) xs) ++ "]"
+printAVal _ = "NULL"
 
 printAType (Aint _) = "integer"
 printAType (Astr _) = "string"
 printAType (Atime _) = "time"
-printAType (Aset i t _) = printCType "set" i t
-printAType (Alist i t _) = printCType "list" i t
-printAType (Atuple i Nothing) = "<< * " ++ (concatMap (\_->", * ") [2..i]) ++ ">>"
-printAType (Atuple _ (Just xs)) = 
+printAType (Aset i xs) = printCType "set" i xs
+printAType (Alist i xs) = printCType "list" i xs
 printAType (Abool _) = "boolean"
 printAType (Aquery _) = "query"
 printAType (Acontact _) = "contact"
 printAType (Aduration _) = "duration"
 printAType (Afloat _) = "double"
-
-printCType kw i t = kw ++ " of " ++ (case i of
+printCType kw i xs= kw ++ " of " ++ (case i of
     0 -> ""
-    _ -> (show i) ++ " ") ++ (printType t)
+    _ -> (show i) ++ " ") ++
+    (case xs of
+        Just (x:_) -> printAType x
+        _ -> "*")
