@@ -24,6 +24,10 @@ data Attribute
     | Aduration (Maybe String) -- TODO
     | Afloat (Maybe Double)
     deriving (Show, Eq)
+isNonNullQuery (Aquery (Just x)) = True
+isNonNullQuery _ = False
+
+getQuery (Aquery (Just x)) = x
 
 time_format = "%Y/%m/%d %H:%M:%S%Q"
 timeFromStr s = readTime defaultTimeLocale time_format s
