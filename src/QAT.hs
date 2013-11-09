@@ -5,7 +5,7 @@ data QAT =
     deriving (Show,Eq)
 
 data Qnested =
-    Qnested [Qexpr] (Maybe Qexpr) [Qorder]
+    Qnested Qexpr (Maybe Qexpr) [Qorder]
     deriving (Show,Eq)
 
 data Qsel =

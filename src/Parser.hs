@@ -239,7 +239,7 @@ absQParser selsParser qConstr = do
     return $ qConstr sel_list mbe_where orders
 
 nestedParser :: MyParser st Qnested
-nestedParser = absQParser selAnonListParser Qnested
+nestedParser = absQParser selAnonItemParser Qnested
 
 queryParser :: MyParser st QAT
 queryParser = absQParser selListParser QAT

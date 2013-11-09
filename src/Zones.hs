@@ -63,7 +63,7 @@ instance MyShow Bool where
 instance MyShow Double where
     myshow x = show x
 instance MyShow QAT where
-    myshow x = show x
+    myshow x = show x -- TODO
 
 pMb Nothing = "NULL"
 pMb (Just x) = myshow x
