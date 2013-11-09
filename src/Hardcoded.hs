@@ -16,7 +16,7 @@ zones =
         [ ("level", Aint (Just 1))
         , ("name", Astr (Just "uw"))
         , ("owner", Astr (Just "/uw/violet07"))
-        , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:8:13.123"))
+        , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))
         , ("contacts", Aset 0 Tcontact Nothing)
         , ("cardinality", Aint (Just 0))
         ]) [
@@ -28,7 +28,7 @@ zones =
             , ("contacts", Aset 3 Tcontact (Just [(Acontact (Just "UW1A")), (Acontact (Just "UW1B")), (Acontact (Just "UW1C"))]))
             , ("cardinality", Aint (Just 1))
             , ("members", Aset 3 Tcontact (Just [(Acontact (Just "UW1"))]))
-            , ("creation", Atime (Just $ timeFromStr "2011/11/09 20:8:13.123"))
+            , ("creation", Atime (Just $ timeFromStr "2011/11/09 20:08:13.123"))
             , ("cpu_usage", Afloat (Just 0.9))
             , ("num_cores", Aint (Just 3))
             , ("has_ups", Abool Nothing)
@@ -70,7 +70,7 @@ zones =
         [ ("level", Aint (Just 1))
         , ("name", Astr (Just "pjwstk"))
         , ("owner", Astr (Just "/pjwstk/whatever01"))
-        , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:8:13.123"))
+        , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))
         , ("contacts", Aset 0 Tcontact Nothing)
         , ("cardinality", Aint (Just 0))
         ]) [

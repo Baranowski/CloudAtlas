@@ -227,7 +227,6 @@ orderItemParser = do
                 Nothing -> Onlast
                 Just x -> x
     return $ Qorder e ord null
-    
 
 absQParser selsParser qConstr = do
     mylex $ keyword "SELECT"

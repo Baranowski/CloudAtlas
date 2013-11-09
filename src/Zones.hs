@@ -8,6 +8,7 @@ import System.Locale
 
 
 data Zone = Zone (M.Map String Attribute) [Zone]
+    deriving (Show, Eq)
 
 data Attribute
     = Aint (Maybe Int)
@@ -21,6 +22,7 @@ data Attribute
     | Acontact (Maybe String)
     | Aduration (Maybe String) -- TODO
     | Afloat (Maybe Double)
+    deriving (Show, Eq)
 data Type
     = Tint
     | Tstr
@@ -32,8 +34,9 @@ data Type
     | Tquery
     | Tcontact
     | Tduration
+    deriving (Show, Eq)
 
-time_format = "%Y/%m/%d %H:%M:%s%Q"
+time_format = "%Y/%m/%d %H:%M:%S%Q"
 timeFromStr s = readTime defaultTimeLocale time_format s
 
 durFromStr s = (Just s)

@@ -2,24 +2,24 @@ module QAT where
 
 data QAT =
     QAT [Qsel] (Maybe Qexpr) [Qorder]
-    deriving (Show)
+    deriving (Show,Eq)
 
 data Qnested =
     Qnested [Qexpr] (Maybe Qexpr) [Qorder]
-    deriving (Show)
+    deriving (Show,Eq)
 
 data Qsel =
     Qsel Qexpr String
-    deriving (Show)
+    deriving (Show,Eq)
 
 data Qorder =
     Qorder Qexpr Order NullOrder
-    deriving (Show)
+    deriving (Show,Eq)
 
 data Order = Oasc | Odesc
-    deriving (Show)
+    deriving (Show,Eq)
 data NullOrder = Onfirst | Onlast
-    deriving (Show)
+    deriving (Show,Eq)
 
 data Qexpr = Eor [Qexpr]
            | Eand [Qexpr]
@@ -40,16 +40,16 @@ data Qexpr = Eor [Qexpr]
            | Esquare
            | Evar String
            | Eapp String [Qexpr]
-    deriving (Show)
+    deriving (Show,Eq)
 
 data MulOper = OpMul | OpDiv | OpMod
-    deriving (Show)
+    deriving (Show,Eq)
 data AddOper = OpAdd | OpSub
-    deriving (Show)
+    deriving (Show,Eq)
 data CmpRel = Rle
             | Rlt
             | Rge
             | Rgt
             | Req
             | Rne
-    deriving (Show)
+    deriving (Show,Eq)
