@@ -252,3 +252,27 @@ eval zs (Erexp e r) = do
     rexp r (Astr _) = return $ Abool Nothing
     rexp r _ = left "Trying to match regexp to a non-string"
 eval _ (Equery q) = performNested q
+eval zs (Erel rel ea eb) = do
+    va <- eval zs ea
+    vb <- eval zs eb
+    zipWithM (go rel) va vb
+    where
+    go rel x y = if (isNull x) || (isNull y)
+        then return $ Abool Nothing
+        else do
+            ord <- cmpA x y
+            let desired = case rel of
+                            Rle -> [LT, EQ]
+                            Rlt -> [LT]
+                            Rge -> [GT, EQ]
+                            Rgt -> [GT]
+                            Req -> [EQ]
+                            Rne -> [LT, GT]
+            return $ Abool (Just (ord `elem` desired))
+
+cmpA :: Attribute -> Attribute -> Interpretation Ordering
+cmpA (Aint (Just a)) (Aint (Just b)) = return $ compare a b
+cmpA (Astr (Just a)) (Astr (Just b)) = return $ compare a b
+cmpA (Aduration (Just a)) (Aduration (Just b)) = return $ compare a b
+cmpA (Atime (Just a)) (Atime (Just b)) = return $ compare a b
+cmpA (Afloat (Just a)) (Afloat (Just b)) = return $ compare a b
