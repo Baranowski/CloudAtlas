@@ -8,6 +8,7 @@ import qualified Data.Map as M
 import Hardcoded
 import Zones
 import QAT
+import Interpreter
 
 panic msg = do
     hPutStrLn stderr msg
@@ -33,13 +34,12 @@ installQueries qList z@(Zone attribs children) myself =
 installAndPerform qList zones myself =
     performQueries (installQueries qList zones myself)
 
-performQueries = id
-
 main = do
     qText <- getContents
     qList <- case parse qText of
         Left err -> panic (show err) >> return []
         Right qList -> return qList
-    let newZones = installAndPerform qList zones myself 
-    putStr $ printAttribs newZones
+    case installAndPerform qList zones myself of
+        Left err -> (panic err)
+        Right newZones -> putStr $ printAttribs newZones
 

@@ -8,7 +8,6 @@ import Data.Time.Format
 import System.Locale
 import Data.Maybe
 
-
 data Zone = Zone (M.Map String Attribute) [Zone]
     deriving (Show, Eq)
 
@@ -26,6 +25,29 @@ data Attribute
     deriving (Show, Eq)
 isNonNullQuery (Aquery (Just x)) = True
 isNonNullQuery _ = False
+isNull (Aint Nothing) = True
+isNull (Astr Nothing) = True
+isNull (Atime Nothing) = True
+isNull (Aset _ Nothing) = True
+isNull (Alist _ Nothing) = True
+isNull (Abool Nothing) = True
+isNull (Aquery Nothing) = True
+isNull (Acontact Nothing) = True
+isNull (Aduration Nothing) = True
+isNull (Afloat Nothing) = True
+isNull _ = False
+
+sameType (Aint _) (Aint _) = True
+sameType (Astr _) (Astr _) = True
+sameType (Atime _) (Atime _) = True
+sameType (Aset _ _) (Aset _ _) = True
+sameType (Alist _ _) (Alist _ _) = True
+sameType (Abool _) (Abool _) = True
+sameType (Aquery _) (Aquery _) = True
+sameType (Acontact _) (Acontact _) = True
+sameType (Aduration _) (Aduration _) = True
+sameType (Afloat _) (Afloat _) = True
+sameType _ _ = False
 
 getQuery (Aquery (Just x)) = x
 
