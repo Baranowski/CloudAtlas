@@ -7,6 +7,7 @@ import Data.Either
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
+import Text.Regex.Posix
 
 import Zones
 import QAT
@@ -77,20 +78,30 @@ cmpLT ((Qorder e ord nord):ros) x y = do
     Afloat (Just da)
     -}
 
-performQ :: QAT -> Interpretation [(String, Attribute)]
-performQ (QAT sels whOld ordering) = do
+performAbs eval whOld ordering = do
     let rordering = reverse ordering
     let wh = fromMaybe Etrue whOld
     origKids <- ask
     kids <- filterM (pred wh) origKids
     kids <- iSortM (cmpLT rordering) kids
-    mapM (evalSel kids) sels
+    eval kids
+
+performQ :: QAT -> Interpretation [(String, Attribute)]
+performQ (QAT sels whOld ordering) = do
+    performAbs evalQ whOld ordering
     where
-        evalSel kids (Qsel e n) = do
-            val <- evalChk kids e
-            case val of
-                [res] -> return (n, res)
-                _ -> left "Expected single value as a result"
+    evalQ kids = mapM (evalSel kids) sels
+    evalSel kids (Qsel e n) = do
+        val <- evalChk kids e
+        case val of
+            [res] -> return (n, res)
+            _ -> left "Expected single value as a result"
+performNested :: Qnested -> Interpretation [Attribute]
+performNested (Qnested e whOld ordering) = do
+    performAbs evalQ whOld ordering
+    where
+    evalQ kids = evalChk kids e
+
 
 checkCol [] = return ()
 checkCol [a] = return ()
@@ -98,11 +109,17 @@ checkCol (a:b:xs) =
     when (not (sameType a b))
         (left "Type mismatch within single column")
 
-checkCols as bs = do
-    checkCol as
-    checkCol bs
-    when ((length as) /= (length bs))
-        (left "Two columns have different lengths")
+checkCols cols = do
+    forM_ cols checkCol
+    let maxLen = foldl (\i xs -> max i (length xs)) 0 cols
+    mapM (extend maxLen) cols
+    where
+    extend len col = do
+        if (length col)==1
+            then return $ replicate len (head col)
+            else if (length col) == len
+                then return col
+                else left "Columns lengths do not match"
 
 evalChk zs e = do
     v <- eval zs e
@@ -116,19 +133,31 @@ eval zs (Eor (e:es)) = do
     where
     combine zs acc e = do
         v <- evalChk zs e
-        checkCols acc v
+        [acc, v] <- checkCols [acc, v]
         zipWithM or' acc v
     or' (Abool (Just x)) (Abool (Just y)) =
         return $ Abool (Just (x || y))
     or' (Abool _) (Abool _) = return $ Abool Nothing
     or' _ _ = left "Trying to apply 'OR' a to non-boolean value"
+eval zs (Eand (e:es)) = do
+    v <- evalChk zs e
+    foldM (combine zs) v es
+    where
+    combine zs acc e = do
+        v <- evalChk zs e
+        [acc, v] <- checkCols [acc, v]
+        zipWithM and' acc v
+    and' (Abool (Just x)) (Abool (Just y)) =
+        return $ Abool (Just (x && y))
+    and' (Abool _) (Abool _) = return $ Abool Nothing
+    and' _ _ = left "Trying to apply 'AND' a to non-boolean value"
 eval zs (Eadd e ops) = do
     v <- evalChk zs e
     foldM (combine zs) v ops
     where
     combine zs acc (op, e) = do
         v <- evalChk zs e
-        checkCols acc v
+        [acc, v] <- checkCols [acc, v]
         zipWithM (go op) acc v
     go OpAdd (Astr (Just x)) (Astr (Just y)) =
         return (Astr (Just (x ++ y)))
@@ -167,7 +196,7 @@ eval zs (Emul e ops) = do
     where
     combine zs acc (op, e) = do
         v <- evalChk zs e
-        checkCols acc v
+        [acc, v] <- checkCols [acc, v]
         zipWithM (go op) acc v
     go OpMul (Aint (Just x)) (Aint (Just y)) =
         return $ Aint (Just (x*y))
@@ -186,3 +215,40 @@ eval zs (Emul e ops) = do
     go OpMul (Afloat _) (Afloat _) = return $ Afloat Nothing
     go OpDiv (Afloat _) (Afloat _) = return $ Afloat Nothing
     go _ _ _ = left "Multiplication or division for unsupported types"
+eval _ Etrue = return [Abool $ Just True]
+eval _ Efalse = return [Abool $ Just False]
+eval _ (Estr s) = return [Astr $ Just s]
+eval _ (Eint i) = return [Aint $ Just i]
+eval _ (Efloat f) = return [Afloat $ Just f]
+eval zs (Evar s) =
+    mapM (getAOrFail s) zs
+    where
+    getAOrFail name z =
+        case getAttr name z of
+            Just x -> return x
+            Nothing -> left $ "Attribute '" ++ name ++ "' not present"
+eval zs (Eneg e) = do
+    v <- evalChk zs e
+    mapM neg v
+    where
+    neg (Aint (Just x)) = return $ Aint (Just (-x))
+    neg (Aint _) = return $ Aint Nothing
+    neg (Afloat (Just x)) = return $ Afloat (Just (-x))
+    neg (Afloat _) = return $ Afloat Nothing
+    neg _ = left "Trying to negate non-numeric value"
+eval zs (Enot e) = do
+    v <- evalChk zs e
+    mapM not' v
+    where
+    not' (Abool (Just x)) = return $ Abool (Just (not x))
+    not' (Abool (Nothing)) = return $ Abool Nothing
+    not' _ = left "Trying 'NOT' on a non-boolean value"
+eval zs (Erexp e r) = do
+    v <- evalChk zs e
+    mapM (rexp r) v
+    where
+    rexp r (Astr (Just s)) =
+        return $ Abool (Just (r =~ s))
+    rexp r (Astr _) = return $ Abool Nothing
+    rexp r _ = left "Trying to match regexp to a non-string"
+eval _ (Equery q) = performNested q

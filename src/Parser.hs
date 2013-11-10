@@ -160,13 +160,6 @@ eBasicParser =
         char ')'
         return res
         )
-    <|> do
-        mylex $ char '<'
-        res <- mylex eListParser
-        char '>'
-        return $ Elist res
-    <|> try (string "{}" >> return Ebraces)
-    <|> try (string "[]" >> return Esquare)
     <|> ( do
         i <- mylex idParser
         args <- optionMaybe $ do

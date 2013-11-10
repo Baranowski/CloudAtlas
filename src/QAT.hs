@@ -35,9 +35,6 @@ data Qexpr = Eor [Qexpr]
            | Estr String
            | Efloat Double
            | Eint Int
-           | Elist [Qexpr]
-           | Ebraces
-           | Esquare
            | Evar String
            | Eapp String [Qexpr]
     deriving (Show,Eq)
