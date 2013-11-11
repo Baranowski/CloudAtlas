@@ -286,24 +286,8 @@ builtin "first" [nl, col] = do
     return [Alist 0 (Just (take n col))]
 builtin "last" [nl, col] = builtin "first" [nl, reverse col]
 builtin "count" [col] = return [Aint (Just (length col))]
-builtin "min" [x:xs] = do
-    res <- foldM min' x xs
-    return [res]
-    where
-        min' x y = do
-            ord <- cmpA x y
-            case ord of
-                LT -> return x
-                _ -> return y
-builtin "max" [x:xs] = do
-    res <- foldM max' x xs
-    return [res]
-    where
-        max' x y = do
-            ord <- cmpA x y
-            case ord of
-                GT -> return x
-                _ -> return y
+builtin "min" [x:xs] = extremeCmp x xs LT
+builtin "max" [x:xs] = extremeCmp x xs GT
 builtin "sum" [x:xs] = do
     res <- foldM add x xs
     return [res]
@@ -343,6 +327,8 @@ builtin "unfold" [col] = do
     where
     go (Alist _ Nothing) = return []
     go (Alist _ (Just xs)) = return xs
+    go (Aset _ Nothing) = return []
+    go (Aset _ (Just xs)) = return xs
 builtin "distinct" [col] = do
     foldM go [] col
     where
@@ -402,3 +388,17 @@ aBuiltin name _ = Left $ "'" ++ name ++ "': unknown function or unsupported argu
 absRound f (Afloat (Just x)) =
     return $ Afloat $ Just $ fromIntegral $ f x
 absRound f (Afloat Nothing) = return $ Afloat  Nothing
+
+extremeCmp x xs desired = do
+    res <- foldM go x xs
+    return [res]
+    where
+    go xv y = do
+        case (isNull xv, isNull y) of
+            (False, False) -> do
+                ord <- cmpA xv y
+                if (ord == desired)
+                    then return xv
+                    else return y
+            (False, True) -> return xv
+            (True, _) -> return y
