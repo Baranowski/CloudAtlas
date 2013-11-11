@@ -53,6 +53,8 @@ getQuery (Aquery (Just x)) = x
 
 time_format = "%Y/%m/%d %H:%M:%S%Q"
 timeFromStr s = readTime defaultTimeLocale time_format s
+epoch :: UTCTime
+epoch = timeFromStr "2000/01/01 00:00:00.000"
 
 durFromStr s = (Just s)
 
@@ -103,6 +105,7 @@ printAVal (Aquery x) = pMb x
 printAVal (Acontact x) = pMb x
 printAVal (Aduration x) = pMb x
 printAVal (Afloat x) = pMb x
+--TODO nadmiarowy przecinek
 printAVal (Aset _ (Just xs)) = "{" ++
     (concatMap ((++", ") . printAVal) xs) ++ "}"
 printAVal (Alist _ (Just xs)) = "[" ++

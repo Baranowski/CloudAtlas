@@ -27,9 +27,7 @@ installQueries qList z@(Zone attribs children) myself =
     queriesToAttribs :: [(String, QAT)] -> [(String, Attribute)]
     queriesToAttribs = map (\(name, qat) -> (name, Aquery (Just qat)))
     installInChosen qList myself@(h:x:xs) z@(Zone attribs _) =
-        if (M.lookup "name" attribs)==(Just (Astr (Just h)))
-            then installQueries qList z (x:xs)
-            else z
+        installQueries qList z (x:xs)
 
 installAndPerform qList zones myself =
     performQueries (installQueries qList zones myself)
@@ -40,6 +38,6 @@ main = do
         Left err -> panic (show err) >> return []
         Right qList -> return qList
     case installAndPerform qList zones myself of
-        Left err -> (panic err)
+        Left err -> (panic $ "Error: " ++ err)
         Right newZones -> putStr $ printAttribs newZones
 

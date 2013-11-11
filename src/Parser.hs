@@ -55,7 +55,7 @@ idParser = try $ do
 topParser :: MyParser st [(String, QAT)]
 topParser = do
     spaces
-    r <- namedQueryParser `sepBy` (char ';')
+    r <- namedQueryParser `sepBy` (mylex $ char ';')
     eof
     return r
 

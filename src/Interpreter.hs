@@ -49,6 +49,7 @@ insertM f x (y:ys) = do
             newys <- insertM f x ys
             return $ y:newys
 
+cmpLT :: [Qorder] -> Zone -> Zone -> Interpretation Bool
 cmpLT [] _ _ = return True
 cmpLT ((Qorder e ord nord):ros) x y = do
     xVal <- evalChk [x] e
@@ -61,22 +62,15 @@ cmpLT ((Qorder e ord nord):ros) x y = do
         (False, True) -> return (nord == Onlast)
         (True, True) -> return False
         (False, False) -> case ord of
-            Oasc -> go x y
-            Odesc -> go y x
+            Oasc -> go xv yv
+            Odesc -> go yv xv
     where
-    go x y = return True
-    {-
-    Aint (Just ia)
-    Astr (Just sa)
-    Atime (Just ta)
-    Aset Int (Just sa)
-    Alist Int (Just la)
-    Abool (Just ba)
-    Aquery (Just qa)
-    Acontact (Just sa)
-    Aduration (Just da)
-    Afloat (Just da)
-    -}
+    go ax ay = do
+        ord <- cmpAL ax ay
+        case ord of
+            LT -> return True
+            EQ -> cmpLT ros x y
+            GT -> return False
 
 performAbs eval whOld ordering = do
     let rordering = reverse ordering
@@ -253,14 +247,14 @@ eval zs (Erexp e r) = do
     rexp r _ = left "Trying to match regexp to a non-string"
 eval _ (Equery q) = performNested q
 eval zs (Erel rel ea eb) = do
-    va <- eval zs ea
-    vb <- eval zs eb
+    va <- evalChk zs ea
+    vb <- evalChk zs eb
     zipWithM (go rel) va vb
     where
     go rel x y = if (isNull x) || (isNull y)
         then return $ Abool Nothing
         else do
-            ord <- cmpA x y
+            ord <- cmpAL x y
             let desired = case rel of
                             Rle -> [LT, EQ]
                             Rlt -> [LT]
@@ -269,10 +263,121 @@ eval zs (Erel rel ea eb) = do
                             Req -> [EQ]
                             Rne -> [LT, GT]
             return $ Abool (Just (ord `elem` desired))
+eval zs (Eapp name esOld) = do
+    vs <- mapM (evalChk zs) esOld
+    lift $ builtin name vs
 
-cmpA :: Attribute -> Attribute -> Interpretation Ordering
+cmpAL x y = lift $ cmpA x y
+cmpA :: Attribute -> Attribute -> Either String Ordering
 cmpA (Aint (Just a)) (Aint (Just b)) = return $ compare a b
 cmpA (Astr (Just a)) (Astr (Just b)) = return $ compare a b
 cmpA (Aduration (Just a)) (Aduration (Just b)) = return $ compare a b
 cmpA (Atime (Just a)) (Atime (Just b)) = return $ compare a b
 cmpA (Afloat (Just a)) (Afloat (Just b)) = return $ compare a b
+cmpA _ _ = Left "Trying to compare values of incompatible or unsupported types"
+
+{- BUILTIN FUNCTIONS -}
+builtin :: String -> [[Attribute]] -> Either String [Attribute]
+builtin "first" [nl, col] = do
+    n <- case nl of
+        [Aint (Just x)] -> return x
+        _ -> Left "Invalid numeric argument to 'first' or 'last'"
+    return [Alist 0 (Just (take n col))]
+builtin "last" [nl, col] = builtin "first" [nl, reverse col]
+builtin "count" [col] = return [Aint (Just (length col))]
+builtin "min" [x:xs] = do
+    res <- foldM min' x xs
+    return [res]
+    where
+        min' x y = do
+            ord <- cmpA x y
+            case ord of
+                LT -> return x
+                _ -> return y
+builtin "max" [x:xs] = do
+    res <- foldM max' x xs
+    return [res]
+    where
+        max' x y = do
+            ord <- cmpA x y
+            case ord of
+                GT -> return x
+                _ -> return y
+builtin "sum" [x:xs] = do
+    res <- foldM add x xs
+    return [res]
+    where
+    add (Aint (Just a)) (Aint (Just b)) = return $ Aint (Just (a+b))
+    add atA@(Aint _) (Aint Nothing) = return $ atA
+    add (Aint Nothing) atB@(Aint _) = return $ atB
+    add (Afloat (Just a)) (Afloat (Just b)) = return $ Afloat (Just (a+b))
+    add atA@(Afloat _) (Afloat Nothing) = return $ atA
+    add (Afloat Nothing) atB@(Afloat _) = return $ atB
+    add _ _ = Left "Applying 'sum' to unsupported value type"
+    -- TODO: duration
+builtin "avg" [col] = do
+    [s] <- builtin "sum" [col]
+    let n = length $ filter (\x -> not $ isNull x) col
+    case n of
+        0 -> return [s]
+        _ -> case s of
+            (Aint (Just x)) -> return [Afloat (Just ((fromIntegral x)/(fromIntegral n)))]
+            (Afloat (Just x)) -> return [Afloat (Just (x/(fromIntegral n)))]
+            -- TODO duration
+            _ -> Left "Applying 'avg' to unsupported value type"
+builtin "land" [col] = do
+    return [Abool (Just (all isTrue col))]
+    where
+    isTrue x = x == Abool (Just True)
+builtin "lor" [col] = do
+    return [Abool (Just (any isTrue col))]
+    where
+    isTrue x = x == Abool (Just True)
+builtin "epoch" [] = return [Atime (Just epoch)]
+builtin name [col] =
+    mapM (aBuiltin name) col
+builtin name _ = Left $ "Function '" ++ name ++ "': unknown function or unsupported argument list"
+aBuiltin "ceil" x = absRound ceiling x
+aBuiltin "floor" x = absRound floor x
+aBuiltin "round" x = absRound round x
+aBuiltin "size" (Astr (Just s)) = return $ Aint (Just (length s))
+aBuiltin "size" (Alist _ (Just l)) = return $ Aint (Just (length l))
+aBuiltin "size" (Aset _ (Just s)) = return $ Aint (Just (length s))
+aBuiltin "size" (Astr Nothing) = return $ Aint Nothing
+aBuiltin "size" (Alist _ Nothing) = return $ Aint Nothing
+aBuiltin "size" (Aset _ Nothing) = return $ Aint Nothing
+aBuiltin "to_string" a = return $ Astr (Just (printAVal a))
+aBuiltin "to_boolean" (Astr (Just "TRUE")) =
+    return $ Abool (Just True)
+aBuiltin "to_boolean" (Astr (Just "FALSE")) =
+    return $ Abool (Just False)
+aBuiltin "to_boolean" (Astr Nothing) =
+    return $ Abool Nothing
+aBuiltin "to_integer" (Astr (Just x)) = case reads x of
+    [(i, "")] -> return $ Aint (Just i)
+    _ -> Left $ "Cannot convert to integer: " ++ x
+aBuiltin "to_integer" (Astr Nothing) = return $ Aint Nothing
+aBuiltin "to_integer" (Afloat (Just x)) =
+    return $ Aint $ Just $ round x
+aBuiltin "to_integer" (Afloat Nothing) =
+    return $ Afloat Nothing
+-- TODO: to_integer duration
+aBuiltin "to_double" (Aint (Just x)) =
+    return $ Afloat (Just $ fromIntegral x)
+aBuiltin "to_double" (Aint Nothing) =
+    return $ Afloat Nothing
+aBuiltin "to_double" (Astr (Just s)) = case reads s of
+    [(i, "")] -> return $ Afloat (Just i)
+    _ -> Left $ "Cannot donvert to double: " ++ s
+aBuiltin "to_double" (Astr Nothing) =
+    return $ Afloat Nothing
+aBuiltin "to_time" (Astr (Just s)) =
+    return $ Atime $ Just $ timeFromStr s
+aBuiltin "to_time" (Astr Nothing) =
+    return $ Atime Nothing
+-- TODO duration <-> string
+aBuiltin name _ = Left $ "'" ++ name ++ "': unknown function or unsupported argument type"
+
+absRound f (Afloat (Just x)) =
+    return $ Afloat $ Just $ fromIntegral $ f x
+absRound f (Afloat Nothing) = return $ Afloat  Nothing
