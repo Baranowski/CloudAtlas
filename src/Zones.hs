@@ -1,12 +1,16 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Zones where
 
+import Text.ParserCombinators.Parsec
 import qualified Data.Map as M
 import QAT
 import Data.Time.Clock
 import Data.Time.Format
 import System.Locale
 import Data.Maybe
+import Data.List
+import Text.Printf
+import Text.Parsec.String
 
 data Zone = Zone (M.Map String Attribute) [Zone]
     deriving (Show, Eq)
@@ -20,7 +24,7 @@ data Attribute
     | Abool (Maybe Bool)
     | Aquery (Maybe QAT)
     | Acontact (Maybe String)
-    | Aduration (Maybe String) -- TODO
+    | Aduration (Maybe Integer)
     | Afloat (Maybe Double)
     deriving (Show, Eq)
 isNonNullQuery (Aquery (Just x)) = True
@@ -56,7 +60,33 @@ timeFromStr s = readTime defaultTimeLocale time_format s
 epoch :: UTCTime
 epoch = timeFromStr "2000/01/01 00:00:00.000"
 
-durFromStr s = (Just s)
+decimal :: GenParser Char st Int
+decimal = do
+    s <- many1 (oneOf ['0'..'9'])
+    case (reads s)::[(Int, String)] of
+        [(i, "")] -> return i
+        _ -> fail "Cannot parse integer"
+
+parseDuration = do
+    sgn <- ((char '+' >> return '+') <|> (char '-' >> return '-'))
+    days <- decimal
+    space
+    hours <- decimal
+    char ':'
+    minutes <- decimal
+    char ':'
+    seconds <- decimal
+    char '.'
+    msecs <- decimal
+    let absVal = ((((days*24)+hours)*60+minutes)*60+seconds)*1000 + msecs
+    let res = case sgn of
+                '+' -> absVal
+                '-' -> -absVal
+    return res
+
+durFromStr s = case parse parseDuration "" s of
+    Left _ -> Nothing
+    Right x -> Just x
 
 getAttr s (Zone attribs _) = M.lookup s attribs
 getAttrS s z = fromJust $ getAttr s z
@@ -103,13 +133,28 @@ printAVal (Atime x) = pMb x
 printAVal (Abool x) = pMb x
 printAVal (Aquery x) = pMb x
 printAVal (Acontact x) = pMb x
-printAVal (Aduration x) = pMb x
+printAVal (Aduration Nothing) = "NULL"
+printAVal (Aduration (Just x)) = 
+    printf "%c%d %02d:%02d:%02d.%03d" sgn days hours minutes secs msecs
+    where
+    (sgn, absX) = case x >= 0 of
+        True -> ('+', x)
+        False -> ('-', -x)
+    msecs = absX `mod` 1000
+    ms_x = absX `div` 1000
+    secs = ms_x `mod` 60
+    s_x = ms_x `div`60
+    minutes = s_x `mod` 60
+    min_x = s_x `div` 60
+    hours = min_x `mod` 24
+    h_x = min_x `div` 24
+    days = h_x
+
 printAVal (Afloat x) = pMb x
---TODO nadmiarowy przecinek
-printAVal (Aset _ (Just xs)) = "{" ++
-    (concatMap ((++", ") . printAVal) xs) ++ "}"
-printAVal (Alist _ (Just xs)) = "[" ++
-    (concatMap ((++", ") . printAVal) xs) ++ "]"
+printAVal (Aset _ (Just xs)) = "{ " ++
+    (", " `intercalate` (map printAVal xs)) ++ " }"
+printAVal (Alist _ (Just xs)) = "[ " ++
+    (", " `intercalate` (map printAVal xs)) ++ " ]"
 printAVal _ = "NULL"
 
 printAType (Aint _) = "integer"
@@ -122,7 +167,7 @@ printAType (Aquery _) = "query"
 printAType (Acontact _) = "contact"
 printAType (Aduration _) = "duration"
 printAType (Afloat _) = "double"
-printCType kw i xs= kw ++ " of " ++ (case i of
+printCType kw i xs = kw ++ " of " ++ (case i of
     0 -> ""
     _ -> (show i) ++ " ") ++
     (case xs of
