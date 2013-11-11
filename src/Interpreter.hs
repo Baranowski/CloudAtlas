@@ -170,7 +170,7 @@ eval zs (Eadd e ops) = do
     go OpAdd (Alist _ _) (Alist _ _) =
         return $ Alist 0 Nothing
     go OpAdd (Aset _ (Just x)) (Aset _ (Just y)) =
-        return $ Aset 0 (Just (x ++ y)) -- TODO
+        return $ Aset 0 (Just (x `union` y))
     go OpAdd (Aset _ _ ) (Aset _ _) =
         return $ Aset 0 Nothing
     go op (Aint (Just x)) (Aint (Just y)) =
@@ -337,6 +337,16 @@ builtin "lor" [col] = do
     where
     isTrue x = x == Abool (Just True)
 builtin "epoch" [] = return [Atime (Just epoch)]
+builtin "unfold" [col] = do
+    res <- mapM go col
+    return $ concat res
+    where
+    go (Alist _ Nothing) = return []
+    go (Alist _ (Just xs)) = return xs
+builtin "distinct" [col] = do
+    foldM go [] col
+    where
+    go xs x = return $ xs `union` [x]
 builtin name [col] =
     mapM (aBuiltin name) col
 builtin name _ = Left $ "Function '" ++ name ++ "': unknown function or unsupported argument list"
