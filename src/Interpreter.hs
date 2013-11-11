@@ -6,6 +6,7 @@ import Control.Monad.Reader
 import Data.Either
 import Data.List
 import Data.Maybe
+import Data.Time.Clock
 import qualified Data.Map as M
 import Text.Regex.Posix
 
@@ -157,12 +158,12 @@ eval zs (Eadd e ops) = do
         return (Astr (Just (x ++ y)))
     go OpAdd (Astr _) (Astr _) = return $ Astr Nothing
     go OpAdd (Atime (Just x)) (Aduration (Just d)) =
-        return $ Atime (Just x) -- TODO
+        return $ Atime $ Just $ (diffTConvert (picosecondsToDiffTime $d*dPrecDiff)) `addUTCTime` x
     go OpAdd (Atime _) (Aduration _) =
         return $ Atime Nothing
     go OpAdd d@(Aduration _) t@(Atime _) = go OpAdd t d
     go OpSub (Atime (Just x)) (Atime (Just y)) =
-        return (Aduration (Just "")) -- TODO
+        return $ Aduration $ Just $ round $ (toRational $ x `diffUTCTime` y) * (toRational dPrecision)
     go OpSub (Atime _) (Atime _) = return $ Atime Nothing
     go OpAdd (Alist _ (Just x)) (Alist _ (Just y)) =
         return $ Alist 0 $ Just $ x ++ y
@@ -313,8 +314,10 @@ builtin "sum" [x:xs] = do
     add (Afloat (Just a)) (Afloat (Just b)) = return $ Afloat (Just (a+b))
     add atA@(Afloat _) (Afloat Nothing) = return $ atA
     add (Afloat Nothing) atB@(Afloat _) = return $ atB
+    add (Aduration (Just a)) (Aduration (Just b)) = return $ Aduration (Just (a+b))
+    add atA@(Aduration _) (Aduration Nothing) = return $ atA
+    add (Aduration Nothing) atB@(Aduration _) = return $ atB
     add _ _ = Left "Applying 'sum' to unsupported value type"
-    -- TODO: duration
 builtin "avg" [col] = do
     [s] <- builtin "sum" [col]
     let n = length $ filter (\x -> not $ isNull x) col
@@ -323,7 +326,7 @@ builtin "avg" [col] = do
         _ -> case s of
             (Aint (Just x)) -> return [Afloat (Just ((fromIntegral x)/(fromIntegral n)))]
             (Afloat (Just x)) -> return [Afloat (Just (x/(fromIntegral n)))]
-            -- TODO duration
+            (Aduration (Just x)) -> return [Aduration $ Just $ round $ (fromIntegral x)/(fromIntegral n)]
             _ -> Left "Applying 'avg' to unsupported value type"
 builtin "land" [col] = do
     return [Abool (Just (all isTrue col))]
@@ -360,22 +363,30 @@ aBuiltin "to_integer" (Astr Nothing) = return $ Aint Nothing
 aBuiltin "to_integer" (Afloat (Just x)) =
     return $ Aint $ Just $ round x
 aBuiltin "to_integer" (Afloat Nothing) =
-    return $ Afloat Nothing
--- TODO: to_integer duration
+    return $ Aint Nothing
+aBuiltin "to_integer" (Aduration Nothing) =
+    return $ Aint Nothing
+aBuiltin "to_integer" (Aduration (Just x)) =
+    return $ Aint (Just $ fromIntegral x)
 aBuiltin "to_double" (Aint (Just x)) =
     return $ Afloat (Just $ fromIntegral x)
 aBuiltin "to_double" (Aint Nothing) =
     return $ Afloat Nothing
 aBuiltin "to_double" (Astr (Just s)) = case reads s of
     [(i, "")] -> return $ Afloat (Just i)
-    _ -> Left $ "Cannot donvert to double: " ++ s
+    _ -> Left $ "Cannot convert to double: " ++ s
 aBuiltin "to_double" (Astr Nothing) =
     return $ Afloat Nothing
 aBuiltin "to_time" (Astr (Just s)) =
     return $ Atime $ Just $ timeFromStr s
 aBuiltin "to_time" (Astr Nothing) =
     return $ Atime Nothing
--- TODO duration <-> string
+aBuiltin "to_duration" (Astr Nothing) =
+    return $ Aduration Nothing
+aBuiltin "to_duration" (Astr (Just x)) =
+    case durFromStr x of
+        Just d -> return $ Aduration $ Just $ fromIntegral d
+        Nothing -> Left $ "'to_duration': Invalid duration format"
 aBuiltin name _ = Left $ "'" ++ name ++ "': unknown function or unsupported argument type"
 
 absRound f (Afloat (Just x)) =

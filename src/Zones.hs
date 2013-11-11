@@ -60,10 +60,10 @@ timeFromStr s = readTime defaultTimeLocale time_format s
 epoch :: UTCTime
 epoch = timeFromStr "2000/01/01 00:00:00.000"
 
-decimal :: GenParser Char st Int
+decimal :: GenParser Char st Integer
 decimal = do
     s <- many1 (oneOf ['0'..'9'])
-    case (reads s)::[(Int, String)] of
+    case (reads s)::[(Integer, String)] of
         [(i, "")] -> return i
         _ -> fail "Cannot parse integer"
 
@@ -90,6 +90,11 @@ durFromStr s = case parse parseDuration "" s of
 
 getAttr s (Zone attribs _) = M.lookup s attribs
 getAttrS s z = fromJust $ getAttr s z
+
+diffTConvert :: DiffTime -> NominalDiffTime
+diffTConvert = fromRational . toRational
+diffTRConvert :: NominalDiffTime -> DiffTime
+diffTRConvert = fromRational . toRational
 
 printAttribs zone = go [] zone
   where
@@ -149,13 +154,16 @@ printAVal (Aduration (Just x)) =
     hours = min_x `mod` 24
     h_x = min_x `div` 24
     days = h_x
-
 printAVal (Afloat x) = pMb x
 printAVal (Aset _ (Just xs)) = "{ " ++
     (", " `intercalate` (map printAVal xs)) ++ " }"
 printAVal (Alist _ (Just xs)) = "[ " ++
     (", " `intercalate` (map printAVal xs)) ++ " ]"
 printAVal _ = "NULL"
+
+dPrecDiff = 1000000
+dPrecision = 1000.0
+
 
 printAType (Aint _) = "integer"
 printAType (Astr _) = "string"
