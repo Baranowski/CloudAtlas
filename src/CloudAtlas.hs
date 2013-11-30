@@ -4,11 +4,17 @@ import Parser
 import System.IO
 import System.Exit
 import qualified Data.Map as M
+import Network.Socket hiding (recvFrom)
+import Network.Socket.ByteString
+import Control.Monad.Reader
+import Control.Concurrent
+import qualified Data.ByteString as B
 
 import Hardcoded
 import Zones
 import QAT
 import Interpreter
+import Communication
 
 panic msg = do
     hPutStrLn stderr msg
@@ -32,12 +38,36 @@ installQueries qList z@(Zone attribs children) myself =
 installAndPerform qList zones myself =
     performQueries (installQueries qList zones myself)
 
+listenPort = 1235
+
+data Env = Env
+
 main = do
-    qText <- getContents
-    qList <- case parse qText of
-        Left err -> panic (show err) >> return []
-        Right qList -> return qList
-    case installAndPerform qList zones myself of
-        Left err -> (panic $ "Error: " ++ err)
-        Right newZones -> putStr $ printAttribs newZones
+    Main.listen Env
+
+listen env = do
+    sock <- socket AF_INET Datagram 0
+    bindSocket sock (SockAddrInet listenPort iNADDR_ANY)
+    server env sock
+
+maxLine = 1235
+
+server env sock = do
+    (mesg, client) <- recvFrom sock maxLine
+    forkIO $ runReaderT (handleMsg (B.unpack mesg) client) env
+    server env sock
+
+handleMsg mesg sender = do
+    case go mesg sender of
+        Left err -> lift $ hPutStrLn stderr (show err)
+        Right (msg, client) -> processMsg msg client
+    where
+      go mesg sender = do
+        (hd, newMsg) <- readHeader mesg
+        msg <- deserializeMsg newMsg
+        newClient <- updateClient sender hd
+        return (msg, newClient)
+
+processMsg (FreshnessInit fr) client = do
+    return () -- TODO
 
