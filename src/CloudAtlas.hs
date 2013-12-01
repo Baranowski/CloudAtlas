@@ -8,9 +8,10 @@ import Network.Socket hiding (recvFrom)
 import Network.Socket.ByteString
 import Control.Monad.Reader
 import Control.Concurrent
+import Control.Concurrent.STM
 import qualified Data.ByteString as B
 
-import Hardcoded
+import qualified Hardcoded
 import Zones
 import QAT
 import Interpreter
@@ -41,9 +42,14 @@ installAndPerform qList zones myself =
 listenPort = 1235
 
 data Env = Env
+    { e_zones :: TVar Zone
+    }
 
 main = do
-    Main.listen Env
+    new_zones <- atomically $ newTVar Hardcoded.zones
+    Main.listen Env{
+        e_zones = new_zones
+        }
 
 listen env = do
     sock <- socket AF_INET Datagram 0
@@ -68,6 +74,13 @@ handleMsg mesg sender = do
         newClient <- updateClient sender hd
         return (msg, newClient)
 
+atom = lift . atomically
+
+myPath = do
+    zTV <- asks e_zones
+    zones <- atom $ readTVar zTV
+    return zones  -- TODO
 processMsg (FreshnessInit fr) client = do
+    zones <- myPath
     return () -- TODO
 

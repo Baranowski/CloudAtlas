@@ -11,8 +11,12 @@ import Data.Maybe
 import Data.List
 import Text.Printf
 import Text.Parsec.String
+import Control.Concurrent.STM
 
-data Zone = Zone (M.Map String Attribute) [Zone]
+data Zone = Zone
+    { z_attrs :: (M.Map String Attribute)
+    , z_kids :: [Zone]
+    }
     deriving (Show, Eq)
 
 data Attribute
