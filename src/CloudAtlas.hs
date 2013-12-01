@@ -5,7 +5,7 @@ import System.IO
 import System.Exit
 import qualified Data.Map as M
 import Data.Word
-import Network.Socket hiding (recvFrom)
+import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
 import Control.Monad.Reader
 import Control.Monad.Error
@@ -84,11 +84,57 @@ handleMsg mesg sender = do
 
 atom = liftIO . atomically
 
+reqAttr n z = do
+    as <- atom $ readTVar (z_attrs z)
+    case M.lookup n as of
+        Nothing -> fail $ "Required attribute " ++ n ++ " does not exist"
+        Just x -> return x
+
+reqTyped n a z = do
+    newA <- reqAttr n z
+    when (not $ sameType newA a) $ fail $ "Wrong type for attribute " ++ n
+    when (isNull newA) $ fail $ "Attribute " ++ n ++ " is null"
+    return newA
+
 myPath = do
     zTV <- asks e_zones
     zones <- atom $ readTVar zTV
-    return zones  -- TODO
+    go [] zones myself
+    where
+      go acc z [] = return $ reverse $ z:acc
+      go acc z (n:ns) = do
+        kids <- filterM (byName n) (z_kids z)
+        when ((length kids) /= 1)
+             (fail $ "Too many or too few children zones with name: " ++ n)
+        go (z:acc) (head kids) ns
+      byName n z = do
+        a <- reqAttr "name" z
+        return (a == Astr (Just n))
+
+
+mkFreshness zones = do
+    l <- mapM mkSingleFr zones
+    return $ Freshness l
+    where
+      mkSingleFr z = do
+        (Astr (Just n)) <- reqTyped "name" (Astr Nothing) z
+        (Atime (Just f)) <- reqTyped "freshness" (Atime Nothing) z
+        return (n, timeToTimestamp f)
+
+sendMsg client msg = do
+    let msgB = serialize msg
+    sock <- liftIO $ socket AF_INET Datagram 0
+    sent <- liftIO $ sendTo sock (B.pack msgB) client
+    liftIO $ sClose sock
+    when (sent < (length msgB))
+         (fail $ "Sent " ++ (show sent) ++ " bytes instead of " ++ (show $ length msgB))
 processMsg (FreshnessInit fr) client = do
     zones <- myPath
+    myFr <- mkFreshness zones
+    sendMsg client (FreshnessResponse myFr)
+    sendUpdate client zones fr
+processMsg (FreshnessResponse fr) client = do
+    zones <- myPath
+    sendUpdate client zones fr
+sendUpdate _ _ _ = do
     return () -- TODO
-

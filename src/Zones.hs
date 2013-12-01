@@ -6,6 +6,7 @@ import qualified Data.Map as M
 import QAT
 import Data.Time.Clock
 import Data.Time.Format
+import Data.Time.Clock.POSIX
 import System.Locale
 import Data.Maybe
 import Data.List
@@ -74,6 +75,7 @@ time_format = "%Y/%m/%d %H:%M:%S%Q"
 timeFromStr s = readTime defaultTimeLocale time_format s
 epoch :: UTCTime
 epoch = timeFromStr "2000/01/01 00:00:00.000"
+timeToTimestamp t = round $ (utcTimeToPOSIXSeconds t) * dPrecision
 
 decimal :: GenParser Char st Integer
 decimal = do
