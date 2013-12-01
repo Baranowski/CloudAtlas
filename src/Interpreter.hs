@@ -13,21 +13,21 @@ import Text.Regex.Posix
 import Zones
 import QAT
 
-performQueries :: Zone -> Either String Zone
-performQueries z@(Zone attribs children) = do
+performQueries :: ZoneS -> Either String ZoneS
+performQueries z@(ZoneS attribs children) = do
     newKids <- mapM performQueries children
     let atL = map snd (M.toList attribs)
     let queries = map getQuery (filter isNonNullQuery atL)
     newAttrsNested <- mapM (\x -> runReaderT (performQ x) newKids) queries
     let newAttrs = concat newAttrsNested
     let updatedAttrs = (M.fromList newAttrs) `M.union` attribs
-    return $ Zone updatedAttrs newKids
+    return $ ZoneS updatedAttrs newKids
 
-type Interpretation res = (ReaderT [Zone] (Either String)) res
+type Interpretation res = (ReaderT [ZoneS] (Either String)) res
 
 left = lift . Left
 
-pred :: Qexpr -> Zone -> Interpretation Bool
+pred :: Qexpr -> ZoneS -> Interpretation Bool
 pred e z = do
     val <- evalChk [z] e
     case val of
@@ -50,7 +50,7 @@ insertM f x (y:ys) = do
             newys <- insertM f x ys
             return $ y:newys
 
-cmpLT :: [Qorder] -> Zone -> Zone -> Interpretation Bool
+cmpLT :: [Qorder] -> ZoneS -> ZoneS -> Interpretation Bool
 cmpLT [] _ _ = return True
 cmpLT ((Qorder e ord nord):ros) x y = do
     xVal <- evalChk [x] e
@@ -121,7 +121,7 @@ evalChk zs e = do
     checkCol v
     return v
 
-eval :: [Zone] -> Qexpr -> Interpretation [Attribute]
+eval :: [ZoneS] -> Qexpr -> Interpretation [Attribute]
 eval zs (Eor (e:es)) = do
     v <- evalChk zs e
     foldM (combine zs) v es

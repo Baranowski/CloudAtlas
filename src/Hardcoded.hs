@@ -4,7 +4,7 @@ import qualified Data.Map as M
 import Zones
 
 zones =
-    Zone (M.fromList
+    ZoneS (M.fromList
     [ ("level", Aint (Just 0))
     , ("name", Astr Nothing)
     , ("owner", Astr (Just "/uw/violet07"))
@@ -12,7 +12,7 @@ zones =
     , ("contacts", Aset 0 Nothing)
     , ("cardinality", Aint (Just 0))
     ]) [
-        (Zone (M.fromList
+        (ZoneS (M.fromList
         [ ("level", Aint (Just 1))
         , ("name", Astr (Just "uw"))
         , ("owner", Astr (Just "/uw/violet07"))
@@ -20,7 +20,7 @@ zones =
         , ("contacts", Aset 0 Nothing)
         , ("cardinality", Aint (Just 0))
         ]) [
-            (Zone (M.fromList
+            (ZoneS (M.fromList
             [ ("level", Aint (Just 2))
             , ("name", Astr (Just "violet07"))
             , ("owner", Astr (Just "/uw/violet07"))
@@ -35,7 +35,7 @@ zones =
             , ("some_names", Alist 3 (Just [(Astr (Just "tola")), (Astr (Just "tosia"))]))
             , ("expiry", Aduration (durFromStr "+13 12:00:00.000"))
             ]) []),
-            (Zone (M.fromList
+            (ZoneS (M.fromList
             [ ("level", Aint (Just 2))
             , ("name", Astr (Just "khaki31"))
             , ("owner", Astr (Just "/uw/khaki31"))
@@ -50,7 +50,7 @@ zones =
             , ("some_names", Alist 3 (Just [(Astr (Just "agatka")), (Astr (Just "beatka")), (Astr (Just "celina"))]))
             , ("expiry", Aduration (durFromStr "-13 11:00:00.000"))
             ]) []),
-            (Zone (M.fromList
+            (ZoneS (M.fromList
             [ ("level", Aint (Just 2))
             , ("name", Astr (Just "khaki13"))
             , ("owner", Astr (Just "/uw/khaki13"))
@@ -66,7 +66,7 @@ zones =
             , ("expiry", Aduration Nothing)
             ]) [])
         ]),
-        (Zone (M.fromList
+        (ZoneS (M.fromList
         [ ("level", Aint (Just 1))
         , ("name", Astr (Just "pjwstk"))
         , ("owner", Astr (Just "/pjwstk/whatever01"))
@@ -74,7 +74,7 @@ zones =
         , ("contacts", Aset 0 Nothing)
         , ("cardinality", Aint (Just 0))
         ]) [
-            (Zone (M.fromList
+            (ZoneS (M.fromList
             [ ("level", Aint (Just 2))
             , ("name", Astr (Just "whatever01"))
             , ("owner", Astr (Just "/pjwstk/whatever01"))
@@ -87,7 +87,7 @@ zones =
             , ("num_cores", Aint (Just 7))
             , ("php_modules", Alist 3 (Just [(Astr (Just "rewrite"))]))
             ]) []),
-            (Zone (M.fromList
+            (ZoneS (M.fromList
             [ ("level", Aint (Just 2))
             , ("name", Astr (Just "whatever02"))
             , ("owner", Astr (Just "/pjwstk/whatever02"))

@@ -13,11 +13,22 @@ import Text.Printf
 import Text.Parsec.String
 import Control.Concurrent.STM
 
+type ZoneInfo = M.Map String Attribute
 data Zone = Zone
-    { z_attrs :: (M.Map String Attribute)
+    { z_attrs :: TVar ZoneInfo
     , z_kids :: [Zone]
     }
+    deriving (Eq)
+data ZoneS = ZoneS
+    { zs_attrs :: ZoneInfo
+    , zs_kids :: [ZoneS]
+    }
     deriving (Show, Eq)
+zoneStoTvar z = do
+    newKids <- mapM zoneStoTvar (zs_kids z)
+    newAttrs <- atomically $ newTVar (zs_attrs z)
+    return Zone{z_attrs=newAttrs, z_kids=newKids}
+
 
 data Attribute
     = Aint (Maybe Int)
@@ -92,7 +103,7 @@ durFromStr s = case parse parseDuration "" s of
     Left _ -> Nothing
     Right x -> Just x
 
-getAttr s (Zone attribs _) = M.lookup s attribs
+getAttr s (ZoneS attribs _) = M.lookup s attribs
 getAttrS s z = fromJust $ getAttr s z
 
 diffTConvert :: DiffTime -> NominalDiffTime
@@ -102,7 +113,7 @@ diffTRConvert = fromRational . toRational
 
 printAttribs zone = go [] zone
   where
-  go path z@(Zone attribs children) =
+  go path z@(ZoneS attribs children) =
     fullName ++ "\n" ++
         (concatMap printNamedAttrib (M.toList attribs)) ++ 
         (concatMap (go newPath) children)

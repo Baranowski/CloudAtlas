@@ -7,6 +7,7 @@ import Data.Bits
 import Data.Char
 import Network.Socket
 import Control.Monad.Error
+import Data.Functor.Identity
 import Data.Either
 
 bToStr = map wToCh
@@ -44,7 +45,8 @@ instance Serializable Msg where
     serialize (FreshnessResponse fr) = 2:(serialize fr)
     serialize (RmiReq r) = 3:(serialize r)
 
-desrMsg ::  [Word8] -> Either String Msg
+generalizeId m = return (runIdentity m)
+desrMsg ::  [Word8] -> (ErrorT String Identity) Msg
 desrMsg (1:xs) = do
     fr <- desrFreshness xs
     return $ FreshnessInit fr
