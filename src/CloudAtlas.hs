@@ -82,6 +82,7 @@ handleMsg mesg sender = do
         newClient <- updateClient sender hd
         return (msg, newClient)
 
+atom ::  STM a -> ReaderT Env (ErrorT String IO) a
 atom = liftIO . atomically
 
 reqAttr n z = do
@@ -111,7 +112,6 @@ myPath = do
         a <- reqAttr "name" z
         return (a == Astr (Just n))
 
-
 mkFreshness zones = do
     l <- mapM mkSingleFr zones
     return $ Freshness l
@@ -128,6 +128,7 @@ sendMsg client msg = do
     liftIO $ sClose sock
     when (sent < (length msgB))
          (fail $ "Sent " ++ (show sent) ++ " bytes instead of " ++ (show $ length msgB))
+
 processMsg (FreshnessInit fr) client = do
     zones <- myPath
     myFr <- mkFreshness zones
@@ -136,5 +137,25 @@ processMsg (FreshnessInit fr) client = do
 processMsg (FreshnessResponse fr) client = do
     zones <- myPath
     sendUpdate client zones fr
-sendUpdate _ _ _ = do
-    return () -- TODO
+
+-- TODO: porownywac nazwy stref
+sendUpdate client zones (Freshness fr) = do
+    when ((length zones) /= (length fr))
+         $ fail $ "sendUpdate: freshness length and my path length do not match"
+    go "" zones fr
+    where
+      go _ [] [] = return ()
+      go p (z:zs) (f:fs) = do
+        (Atime (Just f)) <- reqTyped "freshness" (Atime Nothing) z
+        let ft = timeToTimestamp f
+        nameA <- reqAttr "name" z
+        newPath <- case nameA of
+                    Astr (Just n) -> return $ p ++ n ++ "/"
+                    Astr (Nothing) -> return $ "/"
+                    _ -> fail "Unexpected value type for attribute name"
+        when (ft > (timeToTimestamp f)) (sendZone client newPath z)
+        go newPath zs fs
+
+sendZone client p z = do
+    attrs <- atom $ readTVar (z_attrs z)
+    sendMsg client (ZInfo p (M.toList attrs))

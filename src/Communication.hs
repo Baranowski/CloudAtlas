@@ -65,14 +65,16 @@ readHeader msg = do
 data Msg
     = FreshnessInit Freshness
     | FreshnessResponse Freshness
-    | RmiReq RemoteCall
+    | RmiReq Int RemoteCall
     | ZInfo String [(String, Attribute)]
+    | RmiResp Int RemoteReturn
 
 instance Serializable Msg where
     serialize (FreshnessInit fr) = 1:(serialize fr)
     serialize (FreshnessResponse fr) = 2:(serialize fr)
-    serialize (RmiReq r) = 3:(serialize r)
+    serialize (RmiReq i r) = 3:(serialize i) ++ (serialize r)
     serialize (ZInfo p l) = 4:(serialize p) ++ (serialize l)
+    serialize (RmiResp i r) = 5:(serialize i) ++ (serialize r)
 
     deserialize (1:xs) = do
         (fr, rest) <- deserialize xs
@@ -81,10 +83,22 @@ instance Serializable Msg where
         (fr, rest) <- deserialize xs
         return (FreshnessResponse fr, rest)
     deserialize (3:xs) = do
-        (rmi, rest) <- desrRmi xs
-        return (RmiReq rmi, rest)
+        (i, xs) <- deserialize xs
+        (rmi, xs) <- deserialize xs
+        return (RmiReq i rmi, xs)
+    deserialize (4:xs) = do
+        (p::String, xs) <- deserialize xs
+        (l::[(String, Attribute)], xs) <- deserialize xs
+        return (ZInfo p l, xs)
+    deserialize (5:xs) = do
+        (i, xs) <- deserialize xs
+        (r, xs) <- deserialize xs
+        return (RmiResp i r, xs)
     deserialize _ = fail "Unrecognized Msg serialization"
-deserializeMsg = deserialize :: [Word8] -> CommMonad (Msg, [Word8])
+deserializeMsg xs = do
+    (res, xs) <- deserialize xs
+    when (xs /= []) $ fail $ "Message longer than expected"
+    return res
 
 instance Serializable Attribute where
     serialize (Aint x) = [1] ++ (serialize x)
@@ -194,7 +208,40 @@ instance Serializable QAT where
             Right x -> return x
         return (q, xs)
 
-data RemoteCall = RC -- TODO
+data RemoteCall
+    = SetContacts [Contact]
+    | GetBagOfZones
+    | GetZoneAttrs String
+    | SetZoneAttr {sza_name::String, sza_attr::Attribute}
+
 instance Serializable RemoteCall where
-    serialize _ = return 1
-desrRmi xs = return (RC, [])
+    serialize (SetContacts cs) = 1:(serialize cs)
+    serialize (GetBagOfZones) = [2]
+    serialize (GetZoneAttrs s) = 3:(serialize s)
+    serialize (SetZoneAttr n a) = 4:(serialize n) ++ (serialize a)
+
+    deserialize (1:xs) = do
+        (l::[Contact], xs) <- deserialize xs
+        return (SetContacts l, xs)
+    deserialize (2:xs) = do
+        return (GetBagOfZones, xs)
+    deserialize (3:xs) = do
+        (p::String, xs) <- deserialize xs
+        return (GetZoneAttrs p, xs)
+    deserialize (4:xs) = do
+        (n::String, xs) <- deserialize xs
+        (a::Attribute, xs) <- deserialize xs
+        return (SetZoneAttr n a, xs)
+
+data RemoteReturn
+    = RmiOk
+    | RmiZoneInfo [(String, Attribute)]
+
+instance Serializable RemoteReturn where
+    serialize RmiOk = [1]
+    serialize (RmiZoneInfo l) = 2:(serialize l)
+
+    deserialize (1:xs) = return (RmiOk, xs)
+    deserialize (2:xs) = do
+        (l, xs) <- deserialize xs
+        return (RmiZoneInfo l, xs)

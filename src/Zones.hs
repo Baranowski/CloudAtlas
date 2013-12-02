@@ -31,6 +31,8 @@ zoneStoTvar z = do
     return Zone{z_attrs=newAttrs, z_kids=newKids}
 
 
+type Contact = String
+
 data Attribute
     = Aint (Maybe Int)
     | Astr (Maybe String)
@@ -39,7 +41,7 @@ data Attribute
     | Alist Int (Maybe [Attribute])
     | Abool (Maybe Bool)
     | Aquery (Maybe QAT)
-    | Acontact (Maybe String)
+    | Acontact (Maybe Contact)
     | Aduration (Maybe Integer)
     | Afloat (Maybe Double)
     deriving (Show, Eq)
