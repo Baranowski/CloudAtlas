@@ -2,6 +2,7 @@
 module Communication where
 
 import Data.List.Split
+import Data.Time.Clock
 import Data.Word
 import Data.Bits
 import Data.Char
@@ -11,15 +12,8 @@ import Data.Functor.Identity
 import Data.Either
 
 import Zones
-
-bToStr = map wToCh
-wToCh :: Word8 -> Char
-wToCh w = chr (fromIntegral w)
-
-strToB = map chToW
-chToW :: Char -> Word8
-chToW ch = fromIntegral $ ord ch
-
+import QAT
+import Parser
 
 type CommMonad res = (ErrorT String Identity) res
 generalizeId m = return (runIdentity m)
@@ -46,6 +40,15 @@ instance (Serializable a, Serializable b) => Serializable (a, b) where
         (pB, rest) <- deserialize rest
         return ((pA, pB), rest)
 
+instance Serializable a => Serializable (Maybe a) where
+    serialize Nothing = [0]
+    serialize (Just x) = [1] ++ (serialize x)
+    deserialize (0:xs) = return (Nothing, xs)
+    deserialize (1:xs) = do
+        (res, xs) <- deserialize xs
+        return (Just res, xs)
+    deserialize _ = fail "Unrecognized Maybe serialization"
+
 newtype Header = Header {hd_port :: PortNumber}
 
 updateClient (SockAddrInet p host) hd =
@@ -69,10 +72,7 @@ instance Serializable Msg where
     serialize (FreshnessInit fr) = 1:(serialize fr)
     serialize (FreshnessResponse fr) = 2:(serialize fr)
     serialize (RmiReq r) = 3:(serialize r)
-    serialize (ZInfo p l) = 4:(serialize p) ++ (sAttrs)
-      where
-        sAttrs = (serialize $ length l) ++ (concatMap serAttr l)
-        serAttr (n, a) = (serialize n) ++ (serialize a)
+    serialize (ZInfo p l) = 4:(serialize p) ++ (serialize l)
 
     deserialize (1:xs) = do
         (fr, rest) <- deserialize xs
@@ -83,12 +83,53 @@ instance Serializable Msg where
     deserialize (3:xs) = do
         (rmi, rest) <- desrRmi xs
         return (RmiReq rmi, rest)
-    deserialize _ = fail "deserialize: Unknown message type"
+    deserialize _ = fail "Unrecognized Msg serialization"
 deserializeMsg = deserialize :: [Word8] -> CommMonad (Msg, [Word8])
 
 instance Serializable Attribute where
+    serialize (Aint x) = [1] ++ (serialize x)
+    serialize (Astr x) = [2] ++ (serialize x)
+    serialize (Atime x) = [3] ++ (serialize x)
+    serialize (Aset i l) = [4] ++ (serialize i) ++ (serialize l)
+    serialize (Alist i l) = [5] ++ (serialize i) ++ (serialize l)
+    serialize (Abool x) = [6] ++ (serialize x)
+    serialize (Aquery x) = [7] ++ (serialize x)
+    serialize (Acontact x) = [8] ++ (serialize x)
+    serialize (Aduration x) = [9] ++ (serialize x)
+    serialize (Afloat x) = [10] ++ (serialize x)
 
-    serialize a = [1] -- TODO
+    deserialize (1:xs) = do
+        (i::Maybe Int, xs) <- deserialize xs
+        return (Aint i, xs)
+    deserialize (2:xs) = do
+        (s::Maybe String, xs) <- deserialize xs
+        return (Astr s, xs)
+    deserialize (3:xs) = do
+        (t::Maybe UTCTime, xs) <- deserialize xs
+        return (Atime t, xs)
+    deserialize (4:xs) = do
+        (i::Int, xs) <- deserialize xs
+        (l::Maybe [Attribute], xs) <- deserialize xs
+        return (Aset i l, xs)
+    deserialize (5:xs) = do
+        (i::Int, xs) <- deserialize xs
+        (l::Maybe [Attribute], xs) <- deserialize xs
+        return (Alist i l, xs)
+    deserialize (6:xs) = do
+        (b::Maybe Bool, xs) <- deserialize xs
+        return (Abool b, xs)
+    deserialize (7:xs) = do
+        (q::Maybe QAT, xs) <- deserialize xs
+        return (Aquery q, xs)
+    deserialize (8:xs) = do
+        (c::Maybe String, xs) <- deserialize xs
+        return (Acontact c, xs)
+    deserialize (9:xs) = do
+        (d::Maybe Integer, xs) <- deserialize xs
+        return (Aduration d, xs)
+    deserialize (10:xs) = do
+        (f::Maybe Double, xs) <- deserialize xs
+        return (Afloat f, xs)
 
 newtype Freshness = Freshness [(String, Integer)]
 instance Serializable Freshness where
@@ -122,7 +163,36 @@ instance Serializable Char where
     serialize ch = [fromIntegral $ ord ch]
     deserialize (x:xs) =
         return (chr (fromIntegral x), xs)
-    deserialize _ = fail "Trying to deserialize empty input"
+
+instance Serializable Double where
+    serialize d = (serialize i1) ++ (serialize i2)
+      where
+        (i1, i2) = decodeFloat d
+    deserialize xs = do
+        (i1::Integer, xs) <- deserialize xs
+        (i2::Int, xs) <- deserialize xs
+        return (encodeFloat i1 i2, xs)
+
+instance Serializable UTCTime where
+    serialize t = (serialize $ timeToTimestamp t)
+    deserialize xs = do
+        (i::Integer, xs) <- deserialize xs
+        return (timestampToTime i, xs)
+
+instance Serializable Bool where
+    serialize True = [1]
+    serialize False = [0]
+    deserialize (1:xs) = return (True, xs)
+    deserialize (0:xs) = return (False, xs)
+
+instance Serializable QAT where
+    serialize q = serialize $ show q
+    deserialize xs = do
+        (s::String, xs) <- deserialize xs
+        q <- case (parseSingle s) of
+            Left err -> fail $ show err
+            Right x -> return x
+        return (q, xs)
 
 data RemoteCall = RC -- TODO
 instance Serializable RemoteCall where

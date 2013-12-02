@@ -1,4 +1,4 @@
-module Parser(parse) where
+module Parser(parse, parseSingle) where
 
 import qualified Text.ParserCombinators.Parsec as P (parse)
 import Text.ParserCombinators.Parsec hiding (parse)
@@ -239,3 +239,6 @@ queryParser = absQParser selListParser QAT
 
 parse :: String -> Either ParseError [(String, QAT)]
 parse qText = P.parse topParser "(stdin)" qText
+
+parseSingle :: String -> Either ParseError QAT
+parseSingle qText = P.parse queryParser "" qText
