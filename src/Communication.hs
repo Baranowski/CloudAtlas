@@ -236,6 +236,7 @@ instance Serializable RemoteCall where
 data RemoteReturn
     = RmiOk
     | RmiZoneInfo [(String, Attribute)]
+    | RmiBagOfZones [String]
 
 instance Serializable RemoteReturn where
     serialize RmiOk = [1]

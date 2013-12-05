@@ -137,24 +137,46 @@ processMsg (FreshnessInit fr) client = do
 processMsg (FreshnessResponse fr) client = do
     zones <- myPath
     sendUpdate client zones fr
+processMsg (RmiReq reqId req) client = do
+    resp <- rmiPerform req
+    sendMsg client (RmiResp reqId resp)
 
--- TODO: porownywac nazwy stref
+rmiPerform GetBagOfZones = do
+    zsTvar <- asks e_zones
+    res <- (hoist $ hoist atomically) $ do
+        root <- lift $ lift $ readTVar zsTvar
+        go "" root
+    return $ RmiBagOfZones res
+    where
+      go prevN z = do
+        attrs <- lift $ lift $ readTVar (z_attrs z)
+        let nMbe = M.lookup "name" attrs
+        myName <- case nMbe of
+                    Nothing -> fail "Required attribute 'name' missing"
+                    Just (Astr (Just s)) -> return $ prevN ++ "/" ++ s
+                    Just (Astr Nothing) -> return "/"
+                    Just _ -> fail "Wrong type for attribute 'name'"
+        kidsRess <- mapM (go myName) (z_kids z)
+        return $ myName:(concat kidsRess)
+
 sendUpdate client zones (Freshness fr) = do
-    when ((length zones) /= (length fr))
-         $ fail $ "sendUpdate: freshness length and my path length do not match"
     go "" zones fr
     where
       go _ [] [] = return ()
       go p (z:zs) (f:fs) = do
-        (Atime (Just f)) <- reqTyped "freshness" (Atime Nothing) z
-        let ft = timeToTimestamp f
+        (Atime (Just lf)) <- reqTyped "freshness" (Atime Nothing) z
+        let (fName, fTimestamp) = f
+        let ft = timeToTimestamp lf
         nameA <- reqAttr "name" z
-        newPath <- case nameA of
-                    Astr (Just n) -> return $ p ++ n ++ "/"
-                    Astr (Nothing) -> return $ "/"
+        (newPath, matching) <- case nameA of
+                    Astr (Just n) -> do
+                        return (p ++ n ++ "/", fName == n)
+                    Astr (Nothing) -> return ("/", True)
                     _ -> fail "Unexpected value type for attribute name"
-        when (ft > (timeToTimestamp f)) (sendZone client newPath z)
-        go newPath zs fs
+        when (ft > fTimestamp || not matching)
+             (sendZone client newPath z)
+        when (matching)
+             (go newPath zs fs)
 
 sendZone client p z = do
     attrs <- atom $ readTVar (z_attrs z)
