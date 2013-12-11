@@ -42,7 +42,7 @@ installQueries qList z@(ZoneS attribs children) myself =
 installAndPerform qList zones myself =
     performQueries (installQueries qList zones myself)
 
-listenPort = 1235
+my_port = 12344
 
 data Env = Env
     { e_zones :: TVar Zone
@@ -57,7 +57,7 @@ main = do
 
 listen env = do
     sock <- socket AF_INET Datagram 0
-    bindSocket sock (SockAddrInet listenPort iNADDR_ANY)
+    bindSocket sock (SockAddrInet my_port iNADDR_ANY)
     server env sock
 
 maxLine = 1235
@@ -122,7 +122,7 @@ mkFreshness zones = do
         return (n, timeToTimestamp f)
 
 sendMsg client msg = do
-    let msgB = serialize msg
+    let msgB = addHeader my_port $ serialize msg
     sock <- liftIO $ socket AF_INET Datagram 0
     sent <- liftIO $ sendTo sock (B.pack msgB) client
     liftIO $ sClose sock

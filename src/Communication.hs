@@ -61,6 +61,8 @@ updateClient _ _ =
 readHeader msg = do
     (p::Integer, newMsg) <- deserialize msg
     return (Header (fromIntegral p), newMsg)
+
+addHeader port msg = (serialize ((fromIntegral port)::Integer)) ++ msg
     
 data Msg
     = FreshnessInit Freshness
@@ -241,8 +243,12 @@ data RemoteReturn
 instance Serializable RemoteReturn where
     serialize RmiOk = [1]
     serialize (RmiZoneInfo l) = 2:(serialize l)
+    serialize (RmiBagOfZones l) = 3:(serialize l)
 
     deserialize (1:xs) = return (RmiOk, xs)
     deserialize (2:xs) = do
         (l, xs) <- deserialize xs
         return (RmiZoneInfo l, xs)
+    deserialize (3:xs) = do
+        (l, xs) <- deserialize xs
+        return (RmiBagOfZones l, xs)
