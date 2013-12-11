@@ -156,12 +156,18 @@ instance Serializable Freshness where
         return (Freshness l, xs)
 
 instance Serializable Integer where
-    serialize x = go [] x 0
+    serialize x = if x >= 0
+        then go [] x 0
+        else go [] (-x) 128
       where
         go acc 0 cells = cells:acc
-        go acc x cells = go ((fromIntegral x):acc) (x `shiftR` 8) (cells+1) -- TODO: liczby ujemne
+        go acc x cells = go ((fromIntegral x):acc) (x `shiftR` 8) (cells+1)
 
-    deserialize (count:xs) = go (fromIntegral count) 0 xs
+    deserialize (count:xs) = if count <= 128
+        then go (fromIntegral count) 0 xs
+        else do
+            (res, xs) <- go (fromIntegral $ count-128) 0 xs
+            return (-res, xs)
       where
         go 0 acc xs = return (acc, xs)
         go c acc (x:xs) =

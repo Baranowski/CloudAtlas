@@ -5,6 +5,7 @@ import System.IO
 import System.Exit
 import qualified Data.Map as M
 import Data.Word
+import Data.List.Split
 import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
 import Control.Monad.Reader
@@ -43,6 +44,7 @@ installAndPerform qList zones myself =
     performQueries (installQueries qList zones myself)
 
 my_port = 12344
+debug = True
 
 data Env = Env
     { e_zones :: TVar Zone
@@ -65,6 +67,7 @@ maxLine = 1235
 server env sock = do
     (mesg, client) <- recvFrom sock maxLine
     forkIO $ do
+        when debug (putStrLn "New message received")
         res <- runErrorT $ runReaderT (handleMsg (B.unpack mesg) client) env
         case res of
             Left err -> hPutStrLn stderr err
@@ -126,6 +129,7 @@ sendMsg client msg = do
     sock <- liftIO $ socket AF_INET Datagram 0
     sent <- liftIO $ sendTo sock (B.pack msgB) client
     liftIO $ sClose sock
+    when debug (liftIO $ putStrLn $ "New message sent " ++ (show client))
     when (sent < (length msgB))
          (fail $ "Sent " ++ (show sent) ++ " bytes instead of " ++ (show $ length msgB))
 
@@ -152,12 +156,33 @@ rmiPerform GetBagOfZones = do
         attrs <- lift $ lift $ readTVar (z_attrs z)
         let nMbe = M.lookup "name" attrs
         myName <- case nMbe of
-                    Nothing -> fail "Required attribute 'name' missing"
-                    Just (Astr (Just s)) -> return $ prevN ++ "/" ++ s
+                    Just (Astr (Just s)) -> return $ prevN ++ s ++ "/"
                     Just (Astr Nothing) -> return "/"
-                    Just _ -> fail "Wrong type for attribute 'name'"
+                    _ -> fail "Required attribute 'name' is missing or is of an invalid type"
         kidsRess <- mapM (go myName) (z_kids z)
         return $ myName:(concat kidsRess)
+rmiPerform (GetZoneAttrs path) = do
+    let pathList = splitOn "/" path
+    zsTvar <- asks e_zones
+    res <- (hoist $ hoist atomically) $ do
+        root <- lift $ lift $ readTVar zsTvar
+        go (tail pathList) root
+    return $ RmiZoneInfo res
+    where
+      go [] z = do
+        attrs <- lift $ lift $ readTVar (z_attrs z)
+        return $ M.toList attrs
+        --return [(n, Astr Nothing)]
+      go (n2:ns) z = do
+        kid <- filterM (byName n2) (z_kids z)
+        when ((length kid) /= 1) (fail $ "Error looking up kids with name " ++ n2)
+        go (ns) (head kid)
+      byName n z = do
+        attrs <- lift $ lift $ readTVar (z_attrs z)
+        let nMbe = M.lookup "name" attrs
+        case nMbe of
+            Just (Astr (Just s)) -> return (n==s)
+            _ -> return False
 
 sendUpdate client zones (Freshness fr) = do
     go "" zones fr
