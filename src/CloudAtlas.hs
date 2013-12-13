@@ -63,44 +63,64 @@ main = do
     runReaderT gossiping env
     Main.listen env
 
+reqAttr_stm aN z = do
+    as <- myRead (z_attrs z)
+    case M.lookup aN as of
+        Nothing -> fail $ "Required attribute " ++ aN ++ " does not exist"
+        Just x -> return x
+    
+reqTyped_stm aN aT z = do
+    a <- reqAttr_stm aN z
+    when (not $ sameType a aT) $ fail $ "Wrong type for attribute " ++ aN
+    when (isNull a) $ fail $ "Attribute " ++ aN ++ " is null"
+    return a
+
 gossiping = do
     sock <- liftIO $ socket AF_INET Datagram 0
     loop
     where
       selectLevel = return 1 --TODO
+      oneGossip :: ReaderT Env (ErrorT String IO) ()
       oneGossip = do
         i <- selectLevel
-        let shortPath = intersperse "/" (take i myself)
+        let shortPath = concat $ intersperse "/" (take i myself)
         g <- liftIO $ newStdGen
         cs <- embedSTM $ do
             z <- getByPath_stm shortPath
             kids <- filterM hasContacts (z_kids z)
-            let pos = randomR (0, (length kids)-1) g
-            kidAtrrs <- myRead $ z_attrs $ kids !! pos
-            (Alist _ (Just l)) <- reqTyped_stm "contacts" (Alist 0 Nothing)
-            return l
-        g <- liftIO $ newStGen
+            if (null kids)
+                then return []
+                else do
+                    let (pos,_) = randomR (0, (length kids)-1) g
+                    (Alist _ (Just l)) <- reqTyped_stm "contacts" (Alist 0 Nothing) (kids !! pos)
+                    return l
+        g <- liftIO $ newStdGen
         cs <- case cs of
             [] -> do
                 csTv <- asks e_contacts
                 atom $ readTVar csTv
-            _ -> return cs
-        when (empty cs) $ fail "Contacts list is empty"
-        let ind = randomR (0, (length cs)-1) g
-        let (Acontact sAddr) = cs !! ind
+            _ -> return (concatMap getC cs)
+                 where
+                   getC (Acontact (Just c)) = [c]
+                   getC _ =  []
+        when (null cs) $ fail "Contacts list is empty"
+        let (ind,_) = randomR (0, (length cs)-1) g
+        let sAddr = cs !! ind
         sendFreshness sAddr
       hasContacts z = do
         attrs <- myRead (z_attrs z)
         let cMbe = M.lookup "contacts" attrs
         case cMbe of
-            (Alist _ (Just l)) -> return (length l > 0)
+            Just (Alist _ (Just l)) -> return (length l > 0)
             _ -> return False
+      loop :: ReaderT Env IO ()
       loop = do
-        res <- runErrorT oneGossip
+        env <- ask
+        res <- lift $ runErrorT $ runReaderT oneGossip env
         case res of
-            Left err -> hPutStrLn stderr err
+            Left err -> liftIO $ hPutStrLn stderr err
             Right _ -> return ()
-        threadDelay 5000000 -- TODO magiczna stala
+        liftIO $ threadDelay 5000000 -- TODO magiczna stala
         loop
 
 listen env = do
@@ -138,17 +158,9 @@ handleMsg mesg sender = do
 atom ::  STM a -> ReaderT Env (ErrorT String IO) a
 atom = liftIO . atomically
 
-reqAttr n z = do
-    as <- atom $ readTVar (z_attrs z)
-    case M.lookup n as of
-        Nothing -> fail $ "Required attribute " ++ n ++ " does not exist"
-        Just x -> return x
+reqAttr n z = embedSTM $ reqAttr_stm n z
 
-reqTyped n a z = do
-    newA <- reqAttr n z
-    when (not $ sameType newA a) $ fail $ "Wrong type for attribute " ++ n
-    when (isNull newA) $ fail $ "Attribute " ++ n ++ " is null"
-    return newA
+reqTyped n a z = embedSTM $ reqTyped_stm n a z
 
 myPath = do
     zTV <- asks e_zones
@@ -217,16 +229,14 @@ rmiPerform GetBagOfZones = do
         kidsRess <- mapM (go myName) (z_kids z)
         return $ myName:(concat kidsRess)
 rmiPerform (GetZoneAttrs path) = do
-    zsTvar <- asks e_zones
     res <- embedSTM $ do
-        z <- getByPath_stm zsTvar path
+        z <- getByPath_stm path
         attrs <- myRead $ z_attrs z
         return $ M.toList attrs
     return $ RmiZoneInfo res
 rmiPerform (SetZoneAttr path aName attr) = do
-    zsTvar <- asks e_zones
     embedSTM $ do
-        z <- getByPath_stm zsTvar path
+        z <- getByPath_stm path
         oldAttrs <- myRead (z_attrs z)
         myWrite (z_attrs z) (M.insert aName attr oldAttrs)
     return RmiOk
@@ -235,7 +245,8 @@ rmiPerform (SetContacts cs) = do
     embedSTM $ myWrite csTvar cs
     return RmiOk
 
-getByPath_stm zsTvar path = do
+getByPath_stm path = do
+    zsTvar <- asks e_zones
     let pathList = splitOn "/" path
     root <- myRead zsTvar
     go (tail pathList) root
@@ -254,7 +265,7 @@ getByPath_stm zsTvar path = do
 
 embedSTM = hoist $ hoist atomically
 myRead = lift . lift . readTVar
-myWrite = lift . lift . writeTVar
+myWrite tv val= lift $ lift $ writeTVar tv val
 
 sendUpdate client zones (Freshness fr) = do
     go "" zones fr
