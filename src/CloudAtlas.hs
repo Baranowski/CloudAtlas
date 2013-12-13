@@ -3,9 +3,11 @@ module Main where
 import Parser
 import System.IO
 import System.Exit
+import System.Random
 import qualified Data.Map as M
 import Data.Word
 import Data.List.Split
+import Data.List
 import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
 import Control.Monad.Reader
@@ -25,7 +27,7 @@ panic msg = do
     hPutStrLn stderr msg
     exitFailure
 
-myself = ["uw", "violet07"]
+myself = ["", "uw", "violet07"]
 
 installQueries qList z@(ZoneS attribs children) myself = 
     case myself of
@@ -48,14 +50,58 @@ debug = True
 
 data Env = Env
     { e_zones :: TVar Zone
+    , e_contacts :: TVar [Contact]
     }
 
 main = do
     h_zones <- zoneStoTvar Hardcoded.zones
     new_zones <- atomically $ newTVar h_zones
-    Main.listen Env{
-        e_zones = new_zones
-        }
+    contacts <- atomically $ newTVar []
+    let env = Env { e_zones = new_zones
+                  , e_contacts = contacts
+                  }
+    runReaderT gossiping env
+    Main.listen env
+
+gossiping = do
+    sock <- liftIO $ socket AF_INET Datagram 0
+    loop
+    where
+      selectLevel = return 1 --TODO
+      oneGossip = do
+        i <- selectLevel
+        let shortPath = intersperse "/" (take i myself)
+        g <- liftIO $ newStdGen
+        cs <- embedSTM $ do
+            z <- getByPath_stm shortPath
+            kids <- filterM hasContacts (z_kids z)
+            let pos = randomR (0, (length kids)-1) g
+            kidAtrrs <- myRead $ z_attrs $ kids !! pos
+            (Alist _ (Just l)) <- reqTyped_stm "contacts" (Alist 0 Nothing)
+            return l
+        g <- liftIO $ newStGen
+        cs <- case cs of
+            [] -> do
+                csTv <- asks e_contacts
+                atom $ readTVar csTv
+            _ -> return cs
+        when (empty cs) $ fail "Contacts list is empty"
+        let ind = randomR (0, (length cs)-1) g
+        let (Acontact sAddr) = cs !! ind
+        sendFreshness sAddr
+      hasContacts z = do
+        attrs <- myRead (z_attrs z)
+        let cMbe = M.lookup "contacts" attrs
+        case cMbe of
+            (Alist _ (Just l)) -> return (length l > 0)
+            _ -> return False
+      loop = do
+        res <- runErrorT oneGossip
+        case res of
+            Left err -> hPutStrLn stderr err
+            Right _ -> return ()
+        threadDelay 5000000 -- TODO magiczna stala
+        loop
 
 listen env = do
     sock <- socket AF_INET Datagram 0
@@ -64,14 +110,18 @@ listen env = do
 
 maxLine = 1235
 
-server env sock = do
-    (mesg, client) <- recvFrom sock maxLine
+newThread env monad =
     forkIO $ do
-        when debug (putStrLn "New message received")
-        res <- runErrorT $ runReaderT (handleMsg (B.unpack mesg) client) env
+        res <- runErrorT $ runReaderT monad env
         case res of
             Left err -> hPutStrLn stderr err
             Right _ -> return ()
+
+server env sock = do
+    (mesg, client) <- recvFrom sock maxLine
+    newThread env $ do
+        when debug (liftIO $ putStrLn "New message received")
+        handleMsg (B.unpack mesg) client
     server env sock
 
 handleMsg ::  [Word8] -> SockAddr -> ReaderT Env (ErrorT String IO) ()
@@ -103,7 +153,7 @@ reqTyped n a z = do
 myPath = do
     zTV <- asks e_zones
     zones <- atom $ readTVar zTV
-    go [] zones myself
+    go [] zones (tail myself)
     where
       go acc z [] = return $ reverse $ z:acc
       go acc z (n:ns) = do
@@ -123,6 +173,11 @@ mkFreshness zones = do
         (Astr (Just n)) <- reqTyped "name" (Astr Nothing) z
         (Atime (Just f)) <- reqTyped "freshness" (Atime Nothing) z
         return (n, timeToTimestamp f)
+
+sendFreshness client = do
+    zones <- myPath
+    myFr <- mkFreshness zones
+    sendMsg client (FreshnessInit myFr)
 
 sendMsg client msg = do
     let msgB = addHeader my_port $ serialize msg
@@ -147,7 +202,7 @@ processMsg (RmiReq reqId req) client = do
 
 rmiPerform GetBagOfZones = do
     zsTvar <- asks e_zones
-    res <- (hoist $ hoist atomically) $ do
+    res <- embedSTM $ do
         root <- lift $ lift $ readTVar zsTvar
         go "" root
     return $ RmiBagOfZones res
@@ -162,17 +217,30 @@ rmiPerform GetBagOfZones = do
         kidsRess <- mapM (go myName) (z_kids z)
         return $ myName:(concat kidsRess)
 rmiPerform (GetZoneAttrs path) = do
-    let pathList = splitOn "/" path
     zsTvar <- asks e_zones
-    res <- (hoist $ hoist atomically) $ do
-        root <- lift $ lift $ readTVar zsTvar
-        go (tail pathList) root
-    return $ RmiZoneInfo res
-    where
-      go [] z = do
-        attrs <- lift $ lift $ readTVar (z_attrs z)
+    res <- embedSTM $ do
+        z <- getByPath_stm zsTvar path
+        attrs <- myRead $ z_attrs z
         return $ M.toList attrs
-        --return [(n, Astr Nothing)]
+    return $ RmiZoneInfo res
+rmiPerform (SetZoneAttr path aName attr) = do
+    zsTvar <- asks e_zones
+    embedSTM $ do
+        z <- getByPath_stm zsTvar path
+        oldAttrs <- myRead (z_attrs z)
+        myWrite (z_attrs z) (M.insert aName attr oldAttrs)
+    return RmiOk
+rmiPerform (SetContacts cs) = do
+    csTvar <- asks e_contacts
+    embedSTM $ myWrite csTvar cs
+    return RmiOk
+
+getByPath_stm zsTvar path = do
+    let pathList = splitOn "/" path
+    root <- myRead zsTvar
+    go (tail pathList) root
+    where
+      go [] z = return z
       go (n2:ns) z = do
         kid <- filterM (byName n2) (z_kids z)
         when ((length kid) /= 1) (fail $ "Error looking up kids with name " ++ n2)
@@ -183,6 +251,10 @@ rmiPerform (GetZoneAttrs path) = do
         case nMbe of
             Just (Astr (Just s)) -> return (n==s)
             _ -> return False
+
+embedSTM = hoist $ hoist atomically
+myRead = lift . lift . readTVar
+myWrite = lift . lift . writeTVar
 
 sendUpdate client zones (Freshness fr) = do
     go "" zones fr

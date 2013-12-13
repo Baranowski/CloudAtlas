@@ -13,6 +13,7 @@ import Data.List
 import Text.Printf
 import Text.Parsec.String
 import Control.Concurrent.STM
+import Network.Socket
 
 type ZoneInfo = M.Map String Attribute
 data Zone = Zone
@@ -31,7 +32,7 @@ zoneStoTvar z = do
     return Zone{z_attrs=newAttrs, z_kids=newKids}
 
 
-type Contact = String
+type Contact = SockAddr
 
 data Attribute
     = Aint (Maybe Int)
@@ -41,7 +42,7 @@ data Attribute
     | Alist Int (Maybe [Attribute])
     | Abool (Maybe Bool)
     | Aquery (Maybe QAT)
-    | Acontact (Maybe Contact)
+    | Acontact (Maybe SockAddr)
     | Aduration (Maybe Integer)
     | Afloat (Maybe Double)
     deriving (Show, Eq)
@@ -148,7 +149,9 @@ instance MyShow Bool where
 instance MyShow Double where
     myshow x = show x
 instance MyShow QAT where
-    myshow x = show x -- TODO
+    myshow x = show x
+instance MyShow SockAddr where
+    myshow x = show x
 
 pMb Nothing = "NULL"
 pMb (Just x) = myshow x

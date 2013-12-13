@@ -138,7 +138,7 @@ instance Serializable Attribute where
         (q::Maybe QAT, xs) <- deserialize xs
         return (Aquery q, xs)
     deserialize (8:xs) = do
-        (c::Maybe String, xs) <- deserialize xs
+        (c::Maybe Contact, xs) <- deserialize xs
         return (Acontact c, xs)
     deserialize (9:xs) = do
         (d::Maybe Integer, xs) <- deserialize xs
@@ -175,11 +175,20 @@ instance Serializable Integer where
                ((acc `shiftL` 8) + (fromIntegral x))
                xs
 
+sInt i = serialize ((fromIntegral i)::Integer)
+desInt xs = do
+    (i::Integer, rest) <- deserialize xs
+    return (fromIntegral i, rest)
+
 instance Serializable Int where
-    serialize i = serialize ((fromIntegral i)::Integer)
-    deserialize xs = do
-        (i::Integer, rest) <- deserialize xs
-        return (fromIntegral i, rest)
+    serialize = sInt
+    deserialize = desInt
+instance Serializable Word16 where
+    serialize = sInt
+    deserialize = desInt
+instance Serializable Word32 where
+    serialize = sInt
+    deserialize = desInt
 
 instance Serializable Char where
     serialize ch = [fromIntegral $ ord ch]
@@ -201,6 +210,26 @@ instance Serializable UTCTime where
         (i::Integer, xs) <- deserialize xs
         return (timestampToTime i, xs)
 
+instance Serializable SockAddr where
+    serialize (SockAddrInet (PortNum p) (h)) =
+        1:(serialize p) ++ (serialize h)
+    serialize (SockAddrInet6 (PortNum p) fi (h1,h2,h3,h4) si) =
+        2:(serialize p) ++ (concatMap serialize [fi,h1,h2,h3,h4,si])
+
+    deserialize (1:xs) = do
+        (p::Word16, xs) <- deserialize xs
+        (h::Word32, xs) <- deserialize xs
+        return (SockAddrInet (PortNum p) h, xs)
+    deserialize (2:xs) = do
+        (p::Word16, xs) <- deserialize xs
+        (fi::Word32, xs) <- deserialize xs
+        (h1::Word32, xs) <- deserialize xs
+        (h2::Word32, xs) <- deserialize xs
+        (h3::Word32, xs) <- deserialize xs
+        (h4::Word32, xs) <- deserialize xs
+        (si::Word32, xs) <- deserialize xs
+        return (SockAddrInet6 (PortNum p) fi (h1,h2,h3,h4) si, xs)
+
 instance Serializable Bool where
     serialize True = [1]
     serialize False = [0]
@@ -220,13 +249,13 @@ data RemoteCall
     = SetContacts [Contact]
     | GetBagOfZones
     | GetZoneAttrs String
-    | SetZoneAttr {sza_name::String, sza_attr::Attribute}
+    | SetZoneAttr {sza_path:: String, sza_name::String, sza_attr::Attribute}
 
 instance Serializable RemoteCall where
     serialize (SetContacts cs) = 1:(serialize cs)
     serialize (GetBagOfZones) = [2]
     serialize (GetZoneAttrs s) = 3:(serialize s)
-    serialize (SetZoneAttr n a) = 4:(serialize n) ++ (serialize a)
+    serialize (SetZoneAttr p n a) = 4:(serialize p) ++ (serialize n) ++ (serialize a)
 
     deserialize (1:xs) = do
         (l::[Contact], xs) <- deserialize xs
@@ -237,9 +266,10 @@ instance Serializable RemoteCall where
         (p::String, xs) <- deserialize xs
         return (GetZoneAttrs p, xs)
     deserialize (4:xs) = do
+        (p::String, xs) <- deserialize xs
         (n::String, xs) <- deserialize xs
         (a::Attribute, xs) <- deserialize xs
-        return (SetZoneAttr n a, xs)
+        return (SetZoneAttr p n a, xs)
 
 data RemoteReturn
     = RmiOk
