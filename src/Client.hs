@@ -5,11 +5,15 @@ import System.Environment
 import System.IO
 import System.Exit
 import System.Process
+import Data.List
 import Data.List.Split
+import Data.List.Utils
+import qualified Data.List.Utils as L
 import qualified Data.ConfigFile as C
 import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
 import Control.Monad
+import qualified Control.Monad as M
 import Control.Monad.Morph
 import Control.Monad.Error
 import Control.Monad.State
@@ -41,7 +45,7 @@ data Config = Config { host_name :: String
                      }
 readConfig path = do
     rv <- runErrorT $ do
-        cp <- join $ liftIO $ C.readfile C.emptyCP path
+        cp <- M.join $ liftIO $ C.readfile C.emptyCP path
         hostS <- C.get cp "Remote" "host"
         portS <- C.get cp "Remote" "port"
         path <- C.get cp "Remote" "zone"
@@ -112,44 +116,61 @@ singleIter = do
     where
         attr_names = [ "cpu_load" 
                      , "disk"
-                     , "ram" ]
-                  {- , "swap"
+                     , "ram"
                      , "num_processes"
                      , "num_cores"
                      , "kernel_ver"
                      , "logged_users"
                      , "dns_names"
-                     ] -}
+                     ]
 findAttr "cpu_load" = do
     delay <- asks avgInterval
     output <- liftIO $ readProcess "/usr/bin/top" ["-b", "-n", "2", "-d", show delay] ""
     let s :: [[String]] = output =~ "Cpu\\(s\\): [^\n]+ ([0-9]+.[0-9]*)%id"
-    let idle :: Double = read $ (s !! 1) !! 1
+    let idle = read $ (s !! 1) !! 1
     let load = (100.0 - idle) / 100.0
     return [("cpu_load", Afloat $ Just load)]
 findAttr "disk" = do
     output <- liftIO $ readProcess "/bin/df" ["--total", "-l"] ""
     let s :: [[String]] = output =~ "total [^0-9]+([0-9]+)[^0-9]+[0-9]+[^0-9]+([0-9]+)[^0-9]"
-    let total :: Int = read $ (s !! 0) !! 1
-    let free :: Int = read $ (s !! 0) !! 2
+    let total = read $ (s !! 0) !! 1
+    let free = read $ (s !! 0) !! 2
     return [ ("total_disk", Aint $ Just $ 1024 * total)
            , ("free_disk", Aint $ Just $ 1024 * free)
            ]
 findAttr "ram" = do
     output <- liftIO $ readFile "/proc/meminfo"
     let s :: [[String]] = output =~ "MemTotal:[^0-9]+([0-9]+) kB"
-    let total_ram :: Int = 1024 * (read $ (s !! 0) !! 1)
+    let total_ram = 1024 * (read $ (s !! 0) !! 1)
     let s :: [[String]] = output =~ "MemFree:[^0-9]+([0-9]+) kB"
-    let free_ram :: Int = 1024 * (read $ (s !! 0) !! 1)
+    let free_ram = 1024 * (read $ (s !! 0) !! 1)
     let s :: [[String]] = output =~ "SwapTotal:[^0-9]+([0-9]+) kB"
-    let total_swap :: Int = 1024 * (read $ (s !! 0) !! 1)
+    let total_swap = 1024 * (read $ (s !! 0) !! 1)
     let s :: [[String]] = output =~ "SwapFree:[^0-9]+([0-9]+) kB"
-    let free_swap :: Int = 1024 * (read $ (s !! 0) !! 1)
+    let free_swap = 1024 * (read $ (s !! 0) !! 1)
     return [ ("total_ram", Aint $ Just total_ram)
            , ("free_ram", Aint $ Just free_ram)
            , ("total_swap", Aint $ Just total_swap)
            , ("free_swap", Aint $ Just free_swap)
            ]
+findAttr "num_processes" = do
+    output <- liftIO $ readProcess "/bin/ps" ["aux"] ""
+    return [("num_processes", Aint $ Just $ fromIntegral (countElem '\n' output))]
+findAttr "num_cores" = do
+    output <- liftIO $ readFile "/proc/cpuinfo"
+    let s :: [[String]] = output =~ "model name"
+    return [("num_cores", Aint $ Just $ fromIntegral $ length s)]
+findAttr "kernel_ver" = do
+    output <- liftIO $ readProcess "/bin/uname" ["-r", "-v"] ""
+    return [("kernel_ver", Astr $ Just $ filter (/='\n') output)]
+findAttr "logged_users" = do
+    output <- liftIO $ readProcess "/usr/bin/who" [] ""
+    return [("logged_users", Aint $ Just $ fromIntegral $ countElem '\n' output)]
+findAttr "dns_names" = do
+    output <- liftIO $ readProcess "/bin/hostname" ["-A"] ""
+    let hnames = take 3 $ nub $ words output
+    return [("dns_names", Aset 3 $ Just $ map (Astr . Just) hnames)]
+
 
 findAttr s = fail $ "getAttr: Unknown attribute name: " ++ s
 

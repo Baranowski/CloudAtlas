@@ -35,7 +35,7 @@ zoneStoTvar z = do
 type Contact = SockAddr
 
 data Attribute
-    = Aint (Maybe Int)
+    = Aint (Maybe Integer)
     | Astr (Maybe String)
     | Atime (Maybe UTCTime)
     | Aset Int (Maybe [Attribute])
@@ -137,7 +137,7 @@ printNamedAttrib (name, attr) = "    " ++ name ++ (printAttrib attr) ++ "\n"
 
 class MyShow a where
     myshow :: a -> String
-instance MyShow Int where
+instance MyShow Integer where
     myshow x = show x
 instance MyShow String where
     myshow x = show x

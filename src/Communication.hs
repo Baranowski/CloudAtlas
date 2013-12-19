@@ -115,7 +115,7 @@ instance Serializable Attribute where
     serialize (Afloat x) = [10] ++ (serialize x)
 
     deserialize (1:xs) = do
-        (i::Maybe Int, xs) <- deserialize xs
+        (i, xs) <- deserialize xs
         return (Aint i, xs)
     deserialize (2:xs) = do
         (s::Maybe String, xs) <- deserialize xs
