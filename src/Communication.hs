@@ -249,13 +249,13 @@ data RemoteCall
     = SetContacts [Contact]
     | GetBagOfZones
     | GetZoneAttrs String
-    | SetZoneAttr {sza_path:: String, sza_name::String, sza_attr::Attribute}
+    | SetZoneAttrs {sza_path:: String, sza_attrs::[(String, Attribute)]}
 
 instance Serializable RemoteCall where
     serialize (SetContacts cs) = 1:(serialize cs)
     serialize (GetBagOfZones) = [2]
     serialize (GetZoneAttrs s) = 3:(serialize s)
-    serialize (SetZoneAttr p n a) = 4:(serialize p) ++ (serialize n) ++ (serialize a)
+    serialize (SetZoneAttrs p l) = 4:(serialize p) ++ (serialize l)
 
     deserialize (1:xs) = do
         (l::[Contact], xs) <- deserialize xs
@@ -267,9 +267,8 @@ instance Serializable RemoteCall where
         return (GetZoneAttrs p, xs)
     deserialize (4:xs) = do
         (p::String, xs) <- deserialize xs
-        (n::String, xs) <- deserialize xs
-        (a::Attribute, xs) <- deserialize xs
-        return (SetZoneAttr p n a, xs)
+        (l, xs) <- deserialize xs
+        return (SetZoneAttrs p l, xs)
 
 data RemoteReturn
     = RmiOk
