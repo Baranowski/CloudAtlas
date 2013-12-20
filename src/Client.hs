@@ -31,6 +31,8 @@ my_port = 12345
 main = do
     args <- getArgs
     case args of
+        ['-':_] -> unknown
+        ["help"] -> unknown
         [configPath] -> daemon configPath
         [hostS, portS] -> interactive hostS portS
         _ -> unknown
@@ -125,13 +127,13 @@ singleIter = do
                      ]
 findAttr "cpu_load" = do
     delay <- asks avgInterval
-    output <- liftIO $ readProcess "/usr/bin/top" ["-b", "-n", "2", "-d", show delay] ""
+    output <- liftIO $ myReadProcess "top" ["-b", "-n", "2", "-d", show delay] ""
     let s :: [[String]] = output =~ "Cpu\\(s\\): [^\n]+ ([0-9]+.[0-9]*)%id"
     let idle = read $ (s !! 1) !! 1
     let load = (100.0 - idle) / 100.0
     return [("cpu_load", Afloat $ Just load)]
 findAttr "disk" = do
-    output <- liftIO $ readProcess "/bin/df" ["--total", "-l"] ""
+    output <- liftIO $ myReadProcess "df" ["--total", "-l"] ""
     let s :: [[String]] = output =~ "total [^0-9]+([0-9]+)[^0-9]+[0-9]+[^0-9]+([0-9]+)[^0-9]"
     let total = read $ (s !! 0) !! 1
     let free = read $ (s !! 0) !! 2
@@ -154,28 +156,38 @@ findAttr "ram" = do
            , ("free_swap", Aint $ Just free_swap)
            ]
 findAttr "num_processes" = do
-    output <- liftIO $ readProcess "/bin/ps" ["aux"] ""
+    output <- liftIO $ myReadProcess "ps" ["aux"] ""
     return [("num_processes", Aint $ Just $ fromIntegral (countElem '\n' output))]
 findAttr "num_cores" = do
     output <- liftIO $ readFile "/proc/cpuinfo"
     let s :: [[String]] = output =~ "model name"
     return [("num_cores", Aint $ Just $ fromIntegral $ length s)]
 findAttr "kernel_ver" = do
-    output <- liftIO $ readProcess "/bin/uname" ["-r", "-v"] ""
+    output <- liftIO $ myReadProcess "uname" ["-r", "-v"] ""
     return [("kernel_ver", Astr $ Just $ filter (/='\n') output)]
 findAttr "logged_users" = do
-    output <- liftIO $ readProcess "/usr/bin/who" [] ""
+    output <- liftIO $ myReadProcess "who" [] ""
     return [("logged_users", Aint $ Just $ fromIntegral $ countElem '\n' output)]
 findAttr "dns_names" = do
-    output <- liftIO $ readProcess "/bin/hostname" ["-A"] ""
+    output <- liftIO $ myReadProcess "hostname" ["-A"] ""
     let hnames = take 3 $ nub $ words output
     return [("dns_names", Aset 3 $ Just $ map (Astr . Just) hnames)]
-
-
 findAttr s = fail $ "getAttr: Unknown attribute name: " ++ s
 
+myReadProcess prog args input = do
+    (ext, output, err) <- liftIO $ readProcessWithExitCode prog args input
+    case ext of
+        ExitSuccess -> return output
+        ExitFailure _ -> fail $ "myReadProcess: trying to run " ++ prog ++ ": " ++ err
+
+panic msg = do
+    liftIO $ hPutStrLn stderr msg
+    exitFailure
+
 openSocket hostS portS = do
-    (servAddr:_) <- getAddrInfo Nothing (Just hostS) (Just portS)
+    servAddrs <- getAddrInfo Nothing (Just hostS) (Just portS)
+    when (null servAddrs) $ panic $ "Cannot find host or port: " ++ hostS ++ ":" ++ portS
+    let servAddr = head servAddrs
     sock <- socket (addrFamily servAddr) Datagram defaultProtocol
     bindSocket sock (SockAddrInet my_port iNADDR_ANY)
     return (addrAddress servAddr, sock)
