@@ -60,7 +60,7 @@ main = do
     let env = Env { e_zones = new_zones
                   , e_contacts = contacts
                   }
-    runReaderT gossiping env
+    forkIO $ runReaderT gossiping env
     Main.listen env
 
 reqAttr_stm aN z = do
