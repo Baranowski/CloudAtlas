@@ -70,6 +70,7 @@ data Msg
     | RmiReq Int RemoteCall
     | ZInfo String [(String, Attribute)]
     | RmiResp Int RemoteReturn
+    deriving (Show)
 
 instance Serializable Msg where
     serialize (FreshnessInit fr) = 1:(serialize fr)
@@ -148,6 +149,7 @@ instance Serializable Attribute where
         return (Afloat f, xs)
 
 newtype Freshness = Freshness [(String, Integer)]
+    deriving (Show)
 instance Serializable Freshness where
     serialize (Freshness l) = serialize l
 
@@ -250,6 +252,7 @@ data RemoteCall
     | GetBagOfZones
     | GetZoneAttrs String
     | SetZoneAttrs {sza_path:: String, sza_attrs::[(String, Attribute)]}
+    deriving (Show)
 
 instance Serializable RemoteCall where
     serialize (SetContacts cs) = 1:(serialize cs)
@@ -274,6 +277,7 @@ data RemoteReturn
     = RmiOk
     | RmiZoneInfo [(String, Attribute)]
     | RmiBagOfZones [String]
+    deriving (Show)
 
 instance Serializable RemoteReturn where
     serialize RmiOk = [1]

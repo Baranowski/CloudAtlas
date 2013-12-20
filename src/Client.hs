@@ -119,7 +119,7 @@ singleIter = do
     zpath <- asks zone_path
     id <- gets s_req_id
     newAttrs <- mapM findAttr attr_names
-    liftIO $ putStrLn $ show newAttrs -- FIXME: debug
+    --liftIO $ putStrLn $ show newAttrs -- FIXME: debug
     sendMsg srv sock $ RmiReq id $ SetZoneAttrs zpath (concat newAttrs)
     modify $ \x -> x{s_req_id = (id+1)}
     where
@@ -216,11 +216,14 @@ interactive hostS portS = do
         newId <- process id serv sock cmd
         loop newId serv sock
 
-process id serv sock ["get_zones"] = do
-    sendMsg serv sock (RmiReq id GetBagOfZones) 
+getMsg sock = do
     (mesg, _) <- liftIO $ recvFrom sock 2000
     (hd, newMsg) <- hoist generalizeId $ readHeader (B.unpack mesg)
-    msg <- hoist generalizeId $ deserializeMsg newMsg
+    hoist generalizeId $ deserializeMsg newMsg
+
+process id serv sock ["get_zones"] = do
+    sendMsg serv sock (RmiReq id GetBagOfZones) 
+    msg <- getMsg sock
     case msg of
         RmiResp _ (RmiBagOfZones zs) -> do
             liftIO $ zs `forM_` putStrLn
@@ -229,9 +232,7 @@ process id serv sock ["get_zones"] = do
     return (id+1)
 process id serv sock ["zone", path] = do
     sendMsg serv sock (RmiReq id $ GetZoneAttrs path)
-    (mesg, _) <- liftIO $ recvFrom sock 2000
-    (hd, newMsg) <- hoist generalizeId $ readHeader (B.unpack mesg)
-    msg <- hoist generalizeId $ deserializeMsg newMsg
+    msg <- getMsg sock
     case msg of
         RmiResp _ (RmiZoneInfo l) -> do
             liftIO $ l `forM_` (putStrLn . showAttr)
@@ -240,6 +241,16 @@ process id serv sock ["zone", path] = do
     return (id+1)
     where
         showAttr (name, attr) = name ++ ": " ++ (printAType attr) ++ " = " ++ (printAVal attr)
+process id serv sock ["quit"] = do
+    liftIO $ sClose sock
+    liftIO $ exitSuccess
+    return id
+process id serv sock _ = do
+    liftIO $ putStrLn "Unknown command. Use one of:"
+    liftIO $ putStrLn " - get_zones   - to get a list of all zones"
+    liftIO $ putStrLn " - zone [path] - to list all of zone's attributes"
+    liftIO $ putStrLn " - quit"
+    return id
 
 sendMsg serv sock msg = do
     let packet = addHeader my_port $ serialize msg
