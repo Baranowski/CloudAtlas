@@ -37,7 +37,14 @@ main = do
         [hostS, portS] -> interactive hostS portS
         _ -> unknown
 
-unknown = return () -- TODO: help msg
+unknown = do
+    p <- getProgName
+    hPutStrLn stderr "Usage: "
+    hPutStrLn stderr $ "   " ++ p ++ " [config file]"
+    hPutStrLn stderr $ "       For daemon mode"
+    hPutStrLn stderr $ "   " ++ p ++ " [host name] [port]"
+    hPutStrLn stderr $ "       For interactive mode"
+    exitFailure
 
 data Config = Config { host_name :: String
                      , port_name :: String
