@@ -234,11 +234,11 @@ rmiPerform (GetZoneAttrs path) = do
         attrs <- myRead $ z_attrs z
         return $ M.toList attrs
     return $ RmiZoneInfo res
-rmiPerform (SetZoneAttr path aName attr) = do
+rmiPerform (SetZoneAttrs path attrs) = do
     embedSTM $ do
         z <- getByPath_stm path
         oldAttrs <- myRead (z_attrs z)
-        myWrite (z_attrs z) (M.insert aName attr oldAttrs)
+        myWrite (z_attrs z) ((M.fromList attrs) `M.union` oldAttrs)
     return RmiOk
 rmiPerform (SetContacts cs) = do
     csTvar <- asks e_contacts

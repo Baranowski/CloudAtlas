@@ -213,7 +213,7 @@ eval zs (Emul e ops) = do
 eval _ Etrue = return [Abool $ Just True]
 eval _ Efalse = return [Abool $ Just False]
 eval _ (Estr s) = return [Astr $ Just s]
-eval _ (Eint i) = return [Aint $ Just i]
+eval _ (Eint i) = return [Aint $ Just $ fromIntegral i]
 eval _ (Efloat f) = return [Afloat $ Just f]
 eval zs (Evar s) =
     mapM (getAOrFail s) zs
@@ -283,9 +283,9 @@ builtin "first" [nl, col] = do
     n <- case nl of
         [Aint (Just x)] -> return x
         _ -> Left "Invalid numeric argument to 'first' or 'last'"
-    return [Alist 0 (Just (take n col))]
+    return [Alist 0 (Just (take (fromIntegral n) col))]
 builtin "last" [nl, col] = builtin "first" [nl, reverse col]
-builtin "count" [col] = return [Aint (Just (length col))]
+builtin "count" [col] = return [Aint (Just $ fromIntegral $ length col)]
 builtin "min" [x:xs] = extremeCmp x xs LT
 builtin "max" [x:xs] = extremeCmp x xs GT
 builtin "sum" [x:xs] = do
@@ -339,9 +339,9 @@ builtin name _ = Left $ "Function '" ++ name ++ "': unknown function or unsuppor
 aBuiltin "ceil" x = absRound ceiling x
 aBuiltin "floor" x = absRound floor x
 aBuiltin "round" x = absRound round x
-aBuiltin "size" (Astr (Just s)) = return $ Aint (Just (length s))
-aBuiltin "size" (Alist _ (Just l)) = return $ Aint (Just (length l))
-aBuiltin "size" (Aset _ (Just s)) = return $ Aint (Just (length s))
+aBuiltin "size" (Astr (Just s)) = return $ Aint (Just $ fromIntegral $ length s)
+aBuiltin "size" (Alist _ (Just l)) = return $ Aint (Just $ fromIntegral (length l))
+aBuiltin "size" (Aset _ (Just s)) = return $ Aint (Just $fromIntegral (length s))
 aBuiltin "size" (Astr Nothing) = return $ Aint Nothing
 aBuiltin "size" (Alist _ Nothing) = return $ Aint Nothing
 aBuiltin "size" (Aset _ Nothing) = return $ Aint Nothing
