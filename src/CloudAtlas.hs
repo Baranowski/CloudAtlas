@@ -94,6 +94,13 @@ reqTyped_stm aN aT z = do
     when (isNull a) $ fail $ "Attribute " ++ aN ++ " is null"
     return a
 
+reqName_stm z = do
+    a <- reqAttr_stm "name" z
+    case a of
+        (Astr Nothing) -> return ""
+        (Astr (Just s)) -> return s
+        _ -> fail $ "Wrong type for attribute name"
+
 gossiping = do
     sock <- liftIO $ socket AF_INET Datagram 0
     loop
@@ -200,14 +207,19 @@ myPath = do
         a <- reqAttr "name" z
         return (a == Astr (Just n))
 
-mkFreshness zones = do
-    l <- mapM mkSingleFr zones
+mkFreshness = embedSTM $ do
+    zTv <- asks e_zones 
+    z <- myRead zTv
+    l <- go [] z
     return $ Freshness l
     where
-      mkSingleFr z = do
-        (Astr (Just n)) <- reqTyped "name" (Astr Nothing) z
-        (Atime (Just f)) <- reqTyped "freshness" (Atime Nothing) z
-        return (n, timeToTimestamp f)
+        go path z = do
+            n <- reqName_stm z
+            let newPath = path ++ [n]
+            (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
+            res <- mapM (go newPath) (z_kids z)
+            let sPath = concat $ map ("/"++) newPath
+            return $ (sPath, timeToTimestamp f):(concat res)
 
 sendMsg client msg = do
     conf <- asks e_conf
@@ -224,21 +236,18 @@ initGossip client = do
     sendMsg client (FreshnessPre now)
 processMsg (FreshnessPre t1a) client = do
     t1b <- liftIO $ myCurrentTime
-    zones <- myPath
-    myFr <- mkFreshness zones
+    myFr <- mkFreshness
     t2b <- liftIO $ myCurrentTime
     sendMsg client (FreshnessInit (t1a,t1b,t2b) myFr)
 processMsg (FreshnessInit (t1a,t1b,t2b) fr) client = do
     t2a <- liftIO $ myCurrentTime
-    zones <- myPath
-    myFr <- mkFreshness zones
+    myFr <- mkFreshness
     t3a <- liftIO $ myCurrentTime
     sendMsg client (FreshnessResponse (t2b,t2a,t3a) myFr)
-    sendUpdate client zones fr (t1a,t1b,t2b,t2a)
+    sendUpdate client fr (t1a,t1b,t2b,t2a)
 processMsg (FreshnessResponse (t1a,t1b,t2b) fr) client = do
     t2a <- liftIO $ myCurrentTime
-    zones <- myPath
-    sendUpdate client zones fr (t1a,t1b,t2b,t2a)
+    sendUpdate client fr (t1a,t1b,t2b,t2a)
 processMsg (ZInfo (t1a,t1b,t2b) p l) client = do
     t2a <- liftIO $ myCurrentTime
     embedSTM $ do
@@ -292,16 +301,24 @@ rmiPerform (SetContacts cs) = do
     return RmiOk
 
 getByPath_stm path = do
+    res <- lookupPath_stm path
+    case res of
+        Just z -> return z
+        Nothing -> fail $ "Error looking up zone " ++ path
+
+lookupPath_stm path = do
     zsTvar <- asks e_zones
     let pathList = splitOn "/" path
     root <- myRead zsTvar
     go (tail pathList) root
     where
-      go [] z = return z
+      go [] z = return $ Just z
       go (n2:ns) z = do
         kid <- filterM (byName n2) (z_kids z)
-        when ((length kid) /= 1) (fail $ "Error looking up kids with name " ++ n2)
-        go (ns) (head kid)
+        case (length kid) of
+            0 -> return Nothing
+            1 -> go ns (head kid)
+            _ -> fail $ "Siblings sharing the same name"
       byName n z = do
         attrs <- lift $ lift $ readTVar (z_attrs z)
         let nMbe = M.lookup "name" attrs
@@ -313,25 +330,30 @@ embedSTM = hoist $ hoist atomically
 myRead = lift . lift . readTVar
 myWrite tv val= lift $ lift $ writeTVar tv val
 
-sendUpdate client zones (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
-    go "" zones fr
+sendUpdate client (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
+    fr `forM_` go
     where
-      go _ [] [] = return ()
-      go p (z:zs) (f:fs) = do
-        (Atime (Just lf)) <- reqTyped "freshness" (Atime Nothing) z
-        let (fName, fTimestamp') = f
-        let fTimestamp = frAdjust fTimestamp' times 
-        let ft = timeToTimestamp lf
-        nameA <- reqAttr "name" z
-        (newPath, matching) <- case nameA of
-                    Astr (Just n) -> do
-                        return (p ++ n ++ "/", fName == n)
-                    Astr (Nothing) -> return ("/", True)
-                    _ -> fail "Unexpected value type for attribute name"
-        when (ft > fTimestamp || not matching) $ do
-             sendZone client newPath z (t2b,t2a)
-        when (matching)
-             (go newPath zs fs)
+        go (path, remoteTStamp) = do
+            res <- embedSTM $ do
+                zMbe <- lookupPath_stm path
+                case zMbe of
+                    Just z -> check remoteTStamp times z
+                    Nothing -> return Nothing
+            case res of
+                Just attrs -> do
+                    t3a <- liftIO $ myCurrentTime
+                    sendMsg client (ZInfo (t2b,t2a,t3a) path (M.toList attrs))
+                Nothing -> return ()
+        check rTs times z = do
+            (Atime (Just lf)) <- reqTyped_stm "freshness" (Atime Nothing) z
+            let rt = frAdjust rTs times
+            let lt = timeToTimestamp lf
+            case (lt > rt) of
+                True -> do
+                    attrs <- myRead (z_attrs z)
+                    return $ Just attrs
+                False -> do
+                    return Nothing
 
 frAdjust tstamp times@(t1a,t1b,t2b,t2a) = 
   -- localTStamp: tstamp-(t2b-(t2a-delay))
@@ -339,11 +361,6 @@ frAdjust tstamp times@(t1a,t1b,t2b,t2a) =
   round $ (fromIntegral tstamp)-((fromIntegral t2b)-((fromIntegral t2a) - delay))
   where
     delay = 0.5 * (fromIntegral (t1b+t2a-t1a-t2b))
-
-sendZone client p z (t2b,t2a) = do
-    attrs <- atom $ readTVar (z_attrs z)
-    t3a <- liftIO $ myCurrentTime
-    sendMsg client (ZInfo (t2b,t2a,t3a) p (M.toList attrs))
 
 myCurrentTime = do
     t <- getCurrentTime
