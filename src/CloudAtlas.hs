@@ -9,6 +9,7 @@ import qualified Data.Map as M
 import Data.Word
 import Data.List.Split
 import Data.List
+import Data.Time.Clock
 import Data.ConfigFile as C
 import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
@@ -34,20 +35,22 @@ debug = True
 
 data Config = Config { c_port :: PortNumber
                      , c_path :: [String]
+                     , c_g_freq :: Int
                      }
-data Env = Env
-    { e_zones :: TVar Zone
-    , e_contacts :: TVar [Contact]
-    , e_conf :: Config
-    }
+data Env = Env { e_zones :: TVar Zone
+               , e_contacts :: TVar [Contact]
+               , e_conf :: Config
+               }
 
 readConfig path = do
     rv <- runErrorT $ do
         cp <- Mo.join $ liftIO $ C.readfile C.emptyCP path
         port <- C.get cp "" "port"
         path <- C.get cp "" "zone"
+        freq <- C.get cp "" "gossip_frequency"
         return $ Config { c_port = fromIntegral $ read port
                         , c_path = splitOn "/" path
+                        , c_g_freq = (read freq) * 1000 * 1000
                         }
     case rv of
         Left x -> do
@@ -124,7 +127,7 @@ gossiping = do
         when (null cs) $ fail "Contacts list is empty"
         let (ind,_) = randomR (0, (length cs)-1) g
         let sAddr = cs !! ind
-        sendFreshness sAddr
+        initGossip sAddr
       hasContacts z = do
         attrs <- myRead (z_attrs z)
         let cMbe = M.lookup "contacts" attrs
@@ -138,7 +141,7 @@ gossiping = do
         case res of
             Left err -> liftIO $ hPutStrLn stderr err
             Right _ -> return ()
-        liftIO $ threadDelay 5000000 -- TODO magiczna stala
+        liftIO $ threadDelay (c_g_freq $ e_conf env)
         loop
 
 listen env = do
@@ -146,14 +149,14 @@ listen env = do
     bindSocket sock (SockAddrInet (c_port $ e_conf env) iNADDR_ANY)
     server env sock
 
-maxLine = 1235
-
 newThread env monad =
     forkIO $ do
         res <- runErrorT $ runReaderT monad env
         case res of
             Left err -> hPutStrLn stderr err
             Right _ -> return ()
+
+maxLine = 20000
 
 server env sock = do
     (mesg, client) <- recvFrom sock maxLine
@@ -206,11 +209,6 @@ mkFreshness zones = do
         (Atime (Just f)) <- reqTyped "freshness" (Atime Nothing) z
         return (n, timeToTimestamp f)
 
-sendFreshness client = do
-    zones <- myPath
-    myFr <- mkFreshness zones
-    sendMsg client (FreshnessInit myFr)
-
 sendMsg client msg = do
     conf <- asks e_conf
     let msgB = addHeader (c_port conf) $ serialize msg
@@ -221,14 +219,41 @@ sendMsg client msg = do
     when (sent < (length msgB))
          (fail $ "Sent " ++ (show sent) ++ " bytes instead of " ++ (show $ length msgB))
 
-processMsg (FreshnessInit fr) client = do
+initGossip client = do
+    now <- liftIO $ myCurrentTime
+    sendMsg client (FreshnessPre now)
+processMsg (FreshnessPre t1a) client = do
+    t1b <- liftIO $ myCurrentTime
     zones <- myPath
     myFr <- mkFreshness zones
-    sendMsg client (FreshnessResponse myFr)
-    sendUpdate client zones fr
-processMsg (FreshnessResponse fr) client = do
+    t2b <- liftIO $ myCurrentTime
+    sendMsg client (FreshnessInit (t1a,t1b,t2b) myFr)
+processMsg (FreshnessInit (t1a,t1b,t2b) fr) client = do
+    t2a <- liftIO $ myCurrentTime
     zones <- myPath
-    sendUpdate client zones fr
+    myFr <- mkFreshness zones
+    t3a <- liftIO $ myCurrentTime
+    sendMsg client (FreshnessResponse (t2b,t2a,t3a) myFr)
+    sendUpdate client zones fr (t1a,t1b,t2b,t2a)
+processMsg (FreshnessResponse (t1a,t1b,t2b) fr) client = do
+    t2a <- liftIO $ myCurrentTime
+    zones <- myPath
+    sendUpdate client zones fr (t1a,t1b,t2b,t2a)
+processMsg (ZInfo (t1a,t1b,t2b) p l) client = do
+    t2a <- liftIO $ myCurrentTime
+    embedSTM $ do
+        z <- getByPath_stm p
+        (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
+        let localTStamp = timeToTimestamp f
+        f <- case lookup "freshness" l of
+                Just (Atime (Just f)) -> return f
+                Nothing -> fail $ "The zone received does not have the freshness attribute"
+        let remoteTStamp = timeToTimestamp f
+        let adjusted = frAdjust remoteTStamp (t1a,t1b,t2b,t2a)
+        when (adjusted > localTStamp) $ do
+            oldAttrs <- myRead (z_attrs z)
+            myWrite (z_attrs z) ((M.fromList l) `M.union` oldAttrs)
+
 processMsg (RmiReq reqId req) client = do
     resp <- rmiPerform req
     sendMsg client (RmiResp reqId resp)
@@ -288,13 +313,14 @@ embedSTM = hoist $ hoist atomically
 myRead = lift . lift . readTVar
 myWrite tv val= lift $ lift $ writeTVar tv val
 
-sendUpdate client zones (Freshness fr) = do
+sendUpdate client zones (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
     go "" zones fr
     where
       go _ [] [] = return ()
       go p (z:zs) (f:fs) = do
         (Atime (Just lf)) <- reqTyped "freshness" (Atime Nothing) z
-        let (fName, fTimestamp) = f
+        let (fName, fTimestamp') = f
+        let fTimestamp = frAdjust fTimestamp' times 
         let ft = timeToTimestamp lf
         nameA <- reqAttr "name" z
         (newPath, matching) <- case nameA of
@@ -302,11 +328,23 @@ sendUpdate client zones (Freshness fr) = do
                         return (p ++ n ++ "/", fName == n)
                     Astr (Nothing) -> return ("/", True)
                     _ -> fail "Unexpected value type for attribute name"
-        when (ft > fTimestamp || not matching)
-             (sendZone client newPath z)
+        when (ft > fTimestamp || not matching) $ do
+             sendZone client newPath z (t2b,t2a)
         when (matching)
              (go newPath zs fs)
 
-sendZone client p z = do
+frAdjust tstamp times@(t1a,t1b,t2b,t2a) = 
+  -- localTStamp: tstamp-(t2b-(t2a-delay))
+  -- delay: 0.5 * (t1b + t2a - t1a - t2b)
+  round $ (fromIntegral tstamp)-((fromIntegral t2b)-((fromIntegral t2a) - delay))
+  where
+    delay = 0.5 * (fromIntegral (t1b+t2a-t1a-t2b))
+
+sendZone client p z (t2b,t2a) = do
     attrs <- atom $ readTVar (z_attrs z)
-    sendMsg client (ZInfo p (M.toList attrs))
+    t3a <- liftIO $ myCurrentTime
+    sendMsg client (ZInfo (t2b,t2a,t3a) p (M.toList attrs))
+
+myCurrentTime = do
+    t <- getCurrentTime
+    return $ timeToTimestamp t

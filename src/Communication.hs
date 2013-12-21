@@ -39,6 +39,16 @@ instance (Serializable a, Serializable b) => Serializable (a, b) where
         (pA, rest) <- deserialize xs
         (pB, rest) <- deserialize rest
         return ((pA, pB), rest)
+instance (Serializable a, Serializable b, Serializable c) => Serializable (a, b, c) where
+    serialize (pA, pB, pC) = serialize (pA, (pB, pC))
+    deserialize xs = do
+        ((pA, (pB, pC)), rest) <- deserialize xs
+        return ((pA, pB, pC), rest)
+instance (Serializable a, Serializable b, Serializable c, Serializable d) => Serializable (a, b, c, d) where
+    serialize (pA, pB, pC, pD) = serialize ((pA,pB),(pC,pD))
+    deserialize xs = do
+        (((pA,pB),(pC,pD)), rest) <- deserialize xs
+        return ((pA, pB, pC, pD), rest)
 
 instance Serializable a => Serializable (Maybe a) where
     serialize Nothing = [0]
@@ -65,38 +75,44 @@ readHeader msg = do
 addHeader port msg = (serialize ((fromIntegral port)::Integer)) ++ msg
     
 data Msg
-    = FreshnessInit Freshness
-    | FreshnessResponse Freshness
+    = FreshnessPre Integer
+    | FreshnessInit TimeInfo Freshness
+    | FreshnessResponse TimeInfo Freshness
     | RmiReq Int RemoteCall
-    | ZInfo String [(String, Attribute)]
+    | ZInfo TimeInfo String [(String, Attribute)]
     | RmiResp Int RemoteReturn
     deriving (Show)
 
+type TimeInfo = (Integer,Integer,Integer)
+
 instance Serializable Msg where
-    serialize (FreshnessInit fr) = 1:(serialize fr)
-    serialize (FreshnessResponse fr) = 2:(serialize fr)
+    serialize (FreshnessInit t fr) = 1:(serialize (t,fr))
+    serialize (FreshnessResponse t fr) = 2:(serialize (t,fr))
     serialize (RmiReq i r) = 3:(serialize i) ++ (serialize r)
-    serialize (ZInfo p l) = 4:(serialize p) ++ (serialize l)
+    serialize (ZInfo t p l) = 4:(serialize (t,p,l))
     serialize (RmiResp i r) = 5:(serialize i) ++ (serialize r)
+    serialize (FreshnessPre t) = 6:(serialize t)
 
     deserialize (1:xs) = do
-        (fr, rest) <- deserialize xs
-        return (FreshnessInit fr, rest)
+        ((t,fr), rest) <- deserialize xs
+        return (FreshnessInit t fr, rest)
     deserialize (2:xs) = do
-        (fr, rest) <- deserialize xs
-        return (FreshnessResponse fr, rest)
+        ((t,fr), rest) <- deserialize xs
+        return (FreshnessResponse t fr, rest)
     deserialize (3:xs) = do
         (i, xs) <- deserialize xs
         (rmi, xs) <- deserialize xs
         return (RmiReq i rmi, xs)
     deserialize (4:xs) = do
-        (p::String, xs) <- deserialize xs
-        (l::[(String, Attribute)], xs) <- deserialize xs
-        return (ZInfo p l, xs)
+        ((t,p,l), xs) <- deserialize xs
+        return (ZInfo t p l, xs)
     deserialize (5:xs) = do
         (i, xs) <- deserialize xs
         (r, xs) <- deserialize xs
         return (RmiResp i r, xs)
+    deserialize (6:xs) = do
+        (t, xs) <- deserialize xs
+        return (FreshnessPre t, xs)
     deserialize _ = fail "Unrecognized Msg serialization"
 deserializeMsg xs = do
     (res, xs) <- deserialize xs
