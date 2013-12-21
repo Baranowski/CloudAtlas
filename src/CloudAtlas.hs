@@ -3,13 +3,16 @@ module Main where
 import Parser
 import System.IO
 import System.Exit
+import System.Environment
 import System.Random
 import qualified Data.Map as M
 import Data.Word
 import Data.List.Split
 import Data.List
+import Data.ConfigFile as C
 import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
+import Control.Monad as Mo
 import Control.Monad.Reader
 import Control.Monad.Error
 import Control.Monad.Morph
@@ -27,38 +30,51 @@ panic msg = do
     hPutStrLn stderr msg
     exitFailure
 
-myself = ["", "uw", "violet07"]
-
-installQueries qList z@(ZoneS attribs children) myself = 
-    case myself of
-        h:x:xs -> ZoneS newAttribs newChildren
-        h:xs -> ZoneS newAttribs children
-        _ -> z
-    where
-    newAttribs = attribs `M.union` (M.fromList (queriesToAttribs qList))
-    newChildren = map (installInChosen qList myself) children
-    queriesToAttribs :: [(String, QAT)] -> [(String, Attribute)]
-    queriesToAttribs = map (\(name, qat) -> (name, Aquery (Just qat)))
-    installInChosen qList myself@(h:x:xs) z@(ZoneS attribs _) =
-        installQueries qList z (x:xs)
-
-installAndPerform qList zones myself =
-    performQueries (installQueries qList zones myself)
-
-my_port = 12344
 debug = True
 
+data Config = Config { c_port :: PortNumber
+                     , c_path :: [String]
+                     }
 data Env = Env
     { e_zones :: TVar Zone
     , e_contacts :: TVar [Contact]
+    , e_conf :: Config
     }
 
+readConfig path = do
+    rv <- runErrorT $ do
+        cp <- Mo.join $ liftIO $ C.readfile C.emptyCP path
+        port <- C.get cp "" "port"
+        path <- C.get cp "" "zone"
+        return $ Config { c_port = fromIntegral $ read port
+                        , c_path = splitOn "/" path
+                        }
+    case rv of
+        Left x -> do
+            hPutStrLn stderr $ "readConfig: " ++ (snd x)
+            exitFailure
+        Right x -> return x
+
+unknown = do
+    prog <- getProgName
+    hPutStrLn stderr $ "Usage:"
+    hPutStrLn stderr $ "    " ++ prog ++ " [config file]"
+    exitFailure
+
 main = do
+    args <- getArgs
+    confPath <- case args of
+        ["help"] -> unknown
+        ['-':_] -> unknown
+        [confPath] -> return confPath
+        _ -> unknown
     h_zones <- zoneStoTvar Hardcoded.zones
     new_zones <- atomically $ newTVar h_zones
     contacts <- atomically $ newTVar []
+    conf <- readConfig confPath
     let env = Env { e_zones = new_zones
                   , e_contacts = contacts
+                  , e_conf = conf
                   }
     forkIO $ runReaderT gossiping env
     Main.listen env
@@ -83,6 +99,8 @@ gossiping = do
       oneGossip :: ReaderT Env (ErrorT String IO) ()
       oneGossip = do
         i <- selectLevel
+        conf <- asks e_conf
+        let myself = c_path conf
         let shortPath = concat $ intersperse "/" (take i myself)
         g <- liftIO $ newStdGen
         cs <- embedSTM $ do
@@ -125,7 +143,7 @@ gossiping = do
 
 listen env = do
     sock <- socket AF_INET Datagram 0
-    bindSocket sock (SockAddrInet my_port iNADDR_ANY)
+    bindSocket sock (SockAddrInet (c_port $ e_conf env) iNADDR_ANY)
     server env sock
 
 maxLine = 1235
@@ -164,6 +182,8 @@ reqTyped n a z = embedSTM $ reqTyped_stm n a z
 
 myPath = do
     zTV <- asks e_zones
+    conf <- asks e_conf
+    let myself = c_path conf
     zones <- atom $ readTVar zTV
     go [] zones (tail myself)
     where
@@ -192,7 +212,8 @@ sendFreshness client = do
     sendMsg client (FreshnessInit myFr)
 
 sendMsg client msg = do
-    let msgB = addHeader my_port $ serialize msg
+    conf <- asks e_conf
+    let msgB = addHeader (c_port conf) $ serialize msg
     sock <- liftIO $ socket AF_INET Datagram 0
     sent <- liftIO $ sendTo sock (B.pack msgB) client
     liftIO $ sClose sock
