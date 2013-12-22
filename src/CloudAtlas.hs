@@ -11,11 +11,13 @@ import Data.List.Split
 import Data.List
 import Data.Time.Clock
 import Data.ConfigFile as C
+import Data.Bits
 import Network.Socket hiding (recvFrom, sendTo)
 import Network.Socket.ByteString
 import Control.Monad as Mo
 import Control.Monad.Reader
 import Control.Monad.Error
+import Control.Monad.State
 import Control.Monad.Morph
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -33,10 +35,14 @@ panic msg = do
 
 debug = True
 
+data GossipStrategy = RoundRobin | ExpRR | Random | ExpRandom
+
 data Config = Config { c_port :: PortNumber
                      , c_path :: [String]
                      , c_g_freq :: Int
+                     , c_g_strategy :: GossipStrategy
                      }
+
 data Env = Env { e_zones :: TVar Zone
                , e_contacts :: TVar [Contact]
                , e_conf :: Config
@@ -48,9 +54,17 @@ readConfig path = do
         port <- C.get cp "" "port"
         path <- C.get cp "" "zone"
         freq <- C.get cp "" "gossip_frequency"
+        strt <- C.get cp "" "gossip_strategy"
+        strategy <- case strt of
+            "round-robin" -> return RoundRobin
+            "exp-round-robin" -> return ExpRR
+            "random" -> return Random
+            "exp-random" -> return ExpRandom
+            _ -> fail $ "Unrecognized gossip strategy: " ++ strt
         return $ Config { c_port = fromIntegral $ read port
                         , c_path = splitOn "/" path
                         , c_g_freq = (read freq) * 1000 * 1000
+                        , c_g_strategy = strategy
                         }
     case rv of
         Left x -> do
@@ -101,19 +115,53 @@ reqName_stm z = do
         (Astr (Just s)) -> return s
         _ -> fail $ "Wrong type for attribute name"
 
+data GossipSt = GossipSt { level_st :: Int
+                         }
+gossiping :: ReaderT Env IO ()
 gossiping = do
     sock <- liftIO $ socket AF_INET Datagram 0
-    loop
+    g <- liftIO $ newStdGen
+    runStateT loop GossipSt { level_st = 0
+                            }
+    return ()
     where
-      selectLevel = return 1 --TODO
-      oneGossip :: ReaderT Env (ErrorT String IO) ()
+      selectLevel = do
+        strt <- asks $ c_g_strategy . e_conf
+        myself <- asks $ c_path . e_conf
+        let levelBound = (length myself)-1
+        case strt of
+            RoundRobin -> do
+                modify $ \x -> x{level_st = ((level_st x)+1) `mod` levelBound}
+                gets level_st
+            ExpRR -> do
+                modify $ \x -> x{level_st = ((level_st x)+1)}
+                i <- gets level_st
+                let c = countZeroes i 
+                if c >= levelBound 
+                    then do
+                        modify $ \x -> x{level_st = 0}
+                        return 0
+                    else return c
+            Random -> do
+                g <- liftIO $ newStdGen
+                let (res,_) = randomR(0, levelBound-1) g
+                return res
+            ExpRandom -> do
+                g <- liftIO $ newStdGen
+                let (res,_) = randomR(0::Int, (1 `shiftL` levelBound)-1) g
+                return $ countZeroes res
+        where
+            countZeroes i = if (1 .&. i > 0)
+                then 0
+                else 1 + (countZeroes (i `shiftR` 1))
+
+      oneGossip :: StateT GossipSt (ReaderT Env (ErrorT String IO)) ()
       oneGossip = do
         i <- selectLevel
-        conf <- asks e_conf
-        let myself = c_path conf
+        myself <- asks $ c_path . e_conf
         let shortPath = concat $ intersperse "/" (take i myself)
         g <- liftIO $ newStdGen
-        cs <- embedSTM $ do
+        cs <- lift $ embedSTM $ do
             z <- getByPath_stm shortPath
             kids <- filterM hasContacts (z_kids z)
             if (null kids)
@@ -126,7 +174,7 @@ gossiping = do
         cs <- case cs of
             [] -> do
                 csTv <- asks e_contacts
-                atom $ readTVar csTv
+                lift $ atom $ readTVar csTv
             _ -> return (concatMap getC cs)
                  where
                    getC (Acontact (Just c)) = [c]
@@ -141,15 +189,22 @@ gossiping = do
         case cMbe of
             Just (Alist _ (Just l)) -> return (length l > 0)
             _ -> return False
-      loop :: ReaderT Env IO ()
+      loop :: StateT GossipSt (ReaderT Env IO) ()
       loop = do
-        env <- ask
-        res <- lift $ runErrorT $ runReaderT oneGossip env
-        case res of
-            Left err -> liftIO $ hPutStrLn stderr err
-            Right _ -> return ()
-        liftIO $ threadDelay (c_g_freq $ e_conf env)
+        (hoist $ hoist runErrWithPrint) oneGossip
+        delay <- asks $ c_g_freq . e_conf
+        liftIO $ threadDelay delay
         loop
+
+
+runErrWithPrint :: ErrorT String IO a -> IO a
+runErrWithPrint m = do
+    res <- runErrorT m
+    case res of
+        Left err -> do
+            liftIO $ hPutStrLn stderr err
+            return undefined
+        Right x -> return x
 
 listen env = do
     sock <- socket AF_INET Datagram 0
