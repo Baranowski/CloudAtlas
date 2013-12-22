@@ -19,6 +19,7 @@ import Control.Monad.Reader
 import Control.Monad.Error
 import Control.Monad.State
 import Control.Monad.Morph
+import Control.Monad.Catch
 import Control.Concurrent
 import Control.Concurrent.STM
 import qualified Data.ByteString as B
@@ -158,17 +159,19 @@ gossiping = do
       oneGossip :: StateT GossipSt (ReaderT Env (ErrorT String IO)) ()
       oneGossip = do
         i <- selectLevel
+        liftIO $ putStrLn $ show i
         myself <- asks $ c_path . e_conf
-        let shortPath = concat $ intersperse "/" (take i myself)
+        let shortPath = concat $ intersperse "/" (take (i+1) myself)
         g <- liftIO $ newStdGen
         cs <- lift $ embedSTM $ do
             z <- getByPath_stm shortPath
-            kids <- filterM hasContacts (z_kids z)
+            siblings <- filterM (diffName $ myself !! (i+1)) (z_kids z)
+            kids <- filterM hasContacts siblings
             if (null kids)
                 then return []
                 else do
                     let (pos,_) = randomR (0, (length kids)-1) g
-                    (Alist _ (Just l)) <- reqTyped_stm "contacts" (Alist 0 Nothing) (kids !! pos)
+                    (Aset _ (Just l)) <- reqTyped_stm "contacts" (Aset 0 Nothing) (kids !! pos)
                     return l
         g <- liftIO $ newStdGen
         cs <- case cs of
@@ -186,16 +189,22 @@ gossiping = do
       hasContacts z = do
         attrs <- myRead (z_attrs z)
         let cMbe = M.lookup "contacts" attrs
+        n <- reqName_stm z
         case cMbe of
-            Just (Alist _ (Just l)) -> return (length l > 0)
+            Just (Aset _ (Just l)) -> return (length l > 0)
             _ -> return False
+      diffName n z = do
+        kidN <- reqName_stm z
+        return $ kidN /= n
       loop :: StateT GossipSt (ReaderT Env IO) ()
       loop = do
-        (hoist $ hoist runErrWithPrint) oneGossip
+        myTry $ (hoist $ hoist runErrWithPrint) oneGossip
         delay <- asks $ c_g_freq . e_conf
         liftIO $ threadDelay delay
         loop
 
+myTry :: (MonadCatch m) => m a -> m (Either IOError a)
+myTry = try
 
 runErrWithPrint :: ErrorT String IO a -> IO a
 runErrWithPrint m = do
@@ -203,7 +212,7 @@ runErrWithPrint m = do
     case res of
         Left err -> do
             liftIO $ hPutStrLn stderr err
-            return undefined
+            fail err
         Right x -> return x
 
 listen env = do
