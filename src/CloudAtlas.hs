@@ -381,10 +381,17 @@ rmiPerform (SetZoneAttrs path attrs) = do
         oldAttrs <- myRead (z_attrs z)
         myWrite (z_attrs z) ((M.fromList attrs) `M.union` oldAttrs)
     return RmiOk
-rmiPerform (SetContacts cs) = do
+rmiPerform (SetContacts cSs) = do
+    cs <- mapM resolve cSs
     csTvar <- asks e_contacts
     embedSTM $ myWrite csTvar cs
     return RmiOk
+    where
+    resolve (hS,pS) = do
+        servAddrs <- liftIO $ getAddrInfo Nothing (Just hS) (Just pS)
+        when (null servAddrs) $ fail $ "Cannot find host or port: " ++ hS ++ ":" ++ pS
+        return $ addrAddress $ head servAddrs
+
 
 getByPath_stm path = do
     res <- lookupPath_stm path

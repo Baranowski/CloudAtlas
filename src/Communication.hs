@@ -264,7 +264,7 @@ instance Serializable QAT where
         return (q, xs)
 
 data RemoteCall
-    = SetContacts [Contact]
+    = SetContacts [(String, String)]
     | GetBagOfZones
     | GetZoneAttrs String
     | SetZoneAttrs {sza_path:: String, sza_attrs::[(String, Attribute)]}
@@ -277,7 +277,7 @@ instance Serializable RemoteCall where
     serialize (SetZoneAttrs p l) = 4:(serialize p) ++ (serialize l)
 
     deserialize (1:xs) = do
-        (l::[Contact], xs) <- deserialize xs
+        (l, xs) <- deserialize xs
         return (SetContacts l, xs)
     deserialize (2:xs) = do
         return (GetBagOfZones, xs)

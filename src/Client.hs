@@ -241,6 +241,22 @@ process id serv sock ["zone", path] = do
     return (id+1)
     where
         showAttr (name, attr) = name ++ ": " ++ (printAType attr) ++ " = " ++ (printAVal attr)
+process id serv sock ("set_contacts":cs) = do
+    splitCs <- mapM go cs
+    sendMsg serv sock (RmiReq id $ SetContacts splitCs)
+    msg <- getMsg sock
+    case msg of
+        RmiResp _ RmiOk -> do
+            liftIO $ putStrLn "OK"
+        _ -> do
+            fail "Unexpected response"
+    return (id+1)
+    where
+        go s = do
+            let l = splitOn ":" s
+            when (length l /= 2) $ fail $ "There should be exactly one colon in every contact specification"
+            let [h,p] = l
+            return (h,p)
 process id serv sock ["quit"] = do
     liftIO $ sClose sock
     liftIO $ exitSuccess
@@ -248,7 +264,8 @@ process id serv sock ["quit"] = do
 process id serv sock _ = do
     liftIO $ putStrLn "Unknown command. Use one of:"
     liftIO $ putStrLn " - get_zones   - to get a list of all zones"
-    liftIO $ putStrLn " - zone [path] - to list all of zone's attributes"
+    liftIO $ putStrLn " - zone <path> - to list all of zone's attributes"
+    liftIO $ putStrLn " - set_contacts <host1:port1> [ <host2:port2> [ ... ] ]- to set fallback contacts for an agent"
     liftIO $ putStrLn " - quit"
     return id
 
