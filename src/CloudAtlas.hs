@@ -18,6 +18,8 @@ import Control.Monad as Mo
 import Control.Monad.Reader
 import Control.Monad.Error
 import Control.Monad.State
+import Control.Monad.Writer
+import Control.Monad.Identity
 import Control.Monad.Morph
 import Control.Monad.Catch
 import Control.Concurrent
@@ -42,6 +44,7 @@ data Config = Config { c_port :: PortNumber
                      , c_path :: [String]
                      , c_g_freq :: Int
                      , c_g_strategy :: GossipStrategy
+                     , c_qu_fr :: Int
                      }
 
 data Env = Env { e_zones :: TVar Zone
@@ -54,8 +57,9 @@ readConfig path = do
         cp <- Mo.join $ liftIO $ C.readfile C.emptyCP path
         port <- C.get cp "" "port"
         path <- C.get cp "" "zone"
-        freq <- C.get cp "" "gossip_frequency"
+        gfreq <- C.get cp "" "gossip_frequency"
         strt <- C.get cp "" "gossip_strategy"
+        qufr <- C.get cp "" "query_frequency"
         strategy <- case strt of
             "round-robin" -> return RoundRobin
             "exp-round-robin" -> return ExpRR
@@ -64,8 +68,9 @@ readConfig path = do
             _ -> fail $ "Unrecognized gossip strategy: " ++ strt
         return $ Config { c_port = fromIntegral $ read port
                         , c_path = splitOn "/" path
-                        , c_g_freq = (read freq) * 1000 * 1000
+                        , c_g_freq = (read gfreq) * 1000 * 1000
                         , c_g_strategy = strategy
+                        , c_qu_fr = (read qufr) * 1000 * 1000
                         }
     case rv of
         Left x -> do
@@ -86,7 +91,7 @@ main = do
         ['-':_] -> unknown
         [confPath] -> return confPath
         _ -> unknown
-    h_zones <- zoneStoTvar Hardcoded.zones
+    h_zones <- atomically $ zoneStoTvar Hardcoded.zones
     new_zones <- atomically $ newTVar h_zones
     contacts <- atomically $ newTVar []
     conf <- readConfig confPath
@@ -95,7 +100,24 @@ main = do
                   , e_conf = conf
                   }
     forkIO $ runReaderT gossiping env
+    forkIO $ runReaderT queries env
     Main.listen env
+
+queries = do
+    zTv <- asks e_zones
+    z <- hoist atomically $ do
+        z <- lift $ readTVar zTv
+        lift $ zoneTvarToS z
+    g <- liftIO $ newStdGen
+    now <- liftIO $ getCurrentTime
+    let ((newZ, errs),_) = runIdentity $ runStateT (runWriterT $ performQueries z) (g,now)
+    liftIO $ mapM (hPutStrLn stderr) errs
+    hoist atomically $ do
+        newZTv <- lift $ zoneStoTvar newZ
+        lift $ writeTVar zTv newZTv
+    delay <- asks $ c_qu_fr . e_conf
+    liftIO $ threadDelay delay
+    queries
 
 reqAttr_stm aN z = do
     as <- myRead (z_attrs z)

@@ -1,9 +1,12 @@
 module Interpreter(performQueries) where
 
+import System.Random
 import Prelude hiding (pred)
 import Control.Monad.Error
 import Control.Monad.Reader
-import Data.Either
+import Control.Monad.Writer
+import Control.Monad.State
+import Control.Monad.Identity
 import Data.List
 import Data.Maybe
 import Data.Time.Clock
@@ -13,19 +16,28 @@ import Text.Regex.Posix
 import Zones
 import QAT
 
-performQueries :: ZoneS -> Either String ZoneS
+type IerSt = (StdGen, UTCTime)
+performQueries :: ZoneS -> WriterT [String] (StateT IerSt Identity) ZoneS
 performQueries z@(ZoneS attribs children) = do
     newKids <- mapM performQueries children
     let atL = map snd (M.toList attribs)
     let queries = map getQuery (filter isNonNullQuery atL)
-    newAttrsNested <- mapM (\x -> runReaderT (performQ x) newKids) queries
+    newAttrsNested <- mapM (singleQuery newKids) queries
     let newAttrs = concat newAttrsNested
     let updatedAttrs = (M.fromList newAttrs) `M.union` attribs
     return $ ZoneS updatedAttrs newKids
+    where
+        singleQuery newKids q = do
+            res <- lift $ runErrorT $ runReaderT (performQ q) newKids
+            case res of
+                Left err -> do
+                    tell [err]
+                    return []
+                Right x -> return x
 
-type Interpretation res = (ReaderT [ZoneS] (Either String)) res
+type Interpretation res = ReaderT [ZoneS] (ErrorT String (StateT IerSt Identity)) res
 
-left = lift . Left
+left = fail
 
 pred :: Qexpr -> ZoneS -> Interpretation Bool
 pred e z = do
@@ -266,23 +278,23 @@ eval zs (Erel rel ea eb) = do
             return $ Abool (Just (ord `elem` desired))
 eval zs (Eapp name esOld) = do
     vs <- mapM (evalChk zs) esOld
-    lift $ builtin name vs
+    builtin name vs
 
-cmpAL x y = lift $ cmpA x y
-cmpA :: Attribute -> Attribute -> Either String Ordering
+cmpAL x y = cmpA x y
+cmpA :: Attribute -> Attribute -> Interpretation Ordering
 cmpA (Aint (Just a)) (Aint (Just b)) = return $ compare a b
 cmpA (Astr (Just a)) (Astr (Just b)) = return $ compare a b
 cmpA (Aduration (Just a)) (Aduration (Just b)) = return $ compare a b
 cmpA (Atime (Just a)) (Atime (Just b)) = return $ compare a b
 cmpA (Afloat (Just a)) (Afloat (Just b)) = return $ compare a b
-cmpA _ _ = Left "Trying to compare values of incompatible or unsupported types"
+cmpA _ _ = fail "Trying to compare values of incompatible or unsupported types"
 
 {- BUILTIN FUNCTIONS -}
-builtin :: String -> [[Attribute]] -> Either String [Attribute]
+builtin :: String -> [[Attribute]] -> Interpretation [Attribute]
 builtin "first" [nl, col] = do
     n <- case nl of
         [Aint (Just x)] -> return x
-        _ -> Left "Invalid numeric argument to 'first' or 'last'"
+        _ -> fail "Invalid numeric argument to 'first' or 'last'"
     return [Alist 0 (Just (take (fromIntegral n) col))]
 builtin "last" [nl, col] = builtin "first" [nl, reverse col]
 builtin "count" [col] = return [Aint (Just $ fromIntegral $ length col)]
@@ -301,7 +313,7 @@ builtin "sum" [x:xs] = do
     add (Aduration (Just a)) (Aduration (Just b)) = return $ Aduration (Just (a+b))
     add atA@(Aduration _) (Aduration Nothing) = return $ atA
     add (Aduration Nothing) atB@(Aduration _) = return $ atB
-    add _ _ = Left "Applying 'sum' to unsupported value type"
+    add _ _ = fail "Applying 'sum' to unsupported value type"
 builtin "avg" [col] = do
     [s] <- builtin "sum" [col]
     let n = length $ filter (\x -> not $ isNull x) col
@@ -311,7 +323,7 @@ builtin "avg" [col] = do
             (Aint (Just x)) -> return [Afloat (Just ((fromIntegral x)/(fromIntegral n)))]
             (Afloat (Just x)) -> return [Afloat (Just (x/(fromIntegral n)))]
             (Aduration (Just x)) -> return [Aduration $ Just $ round $ (fromIntegral x)/(fromIntegral n)]
-            _ -> Left "Applying 'avg' to unsupported value type"
+            _ -> fail "Applying 'avg' to unsupported value type"
 builtin "land" [col] = do
     return [Abool (Just (all isTrue col))]
     where
@@ -335,7 +347,7 @@ builtin "distinct" [col] = do
     go xs x = return $ xs `union` [x]
 builtin name [col] =
     mapM (aBuiltin name) col
-builtin name _ = Left $ "Function '" ++ name ++ "': unknown function or unsupported argument list"
+builtin name _ = fail $ "Function '" ++ name ++ "': unknown function or unsupported argument list"
 aBuiltin "ceil" x = absRound ceiling x
 aBuiltin "floor" x = absRound floor x
 aBuiltin "round" x = absRound round x
@@ -354,7 +366,7 @@ aBuiltin "to_boolean" (Astr Nothing) =
     return $ Abool Nothing
 aBuiltin "to_integer" (Astr (Just x)) = case reads x of
     [(i, "")] -> return $ Aint (Just i)
-    _ -> Left $ "Cannot convert to integer: " ++ x
+    _ -> fail $ "Cannot convert to integer: " ++ x
 aBuiltin "to_integer" (Astr Nothing) = return $ Aint Nothing
 aBuiltin "to_integer" (Afloat (Just x)) =
     return $ Aint $ Just $ round x
@@ -370,7 +382,7 @@ aBuiltin "to_double" (Aint Nothing) =
     return $ Afloat Nothing
 aBuiltin "to_double" (Astr (Just s)) = case reads s of
     [(i, "")] -> return $ Afloat (Just i)
-    _ -> Left $ "Cannot convert to double: " ++ s
+    _ -> fail $ "Cannot convert to double: " ++ s
 aBuiltin "to_double" (Astr Nothing) =
     return $ Afloat Nothing
 aBuiltin "to_time" (Astr (Just s)) =
@@ -382,8 +394,8 @@ aBuiltin "to_duration" (Astr Nothing) =
 aBuiltin "to_duration" (Astr (Just x)) =
     case durFromStr x of
         Just d -> return $ Aduration $ Just $ fromIntegral d
-        Nothing -> Left $ "'to_duration': Invalid duration format"
-aBuiltin name _ = Left $ "'" ++ name ++ "': unknown function or unsupported argument type"
+        Nothing -> fail $ "'to_duration': Invalid duration format"
+aBuiltin name _ = fail $ "'" ++ name ++ "': unknown function or unsupported argument type"
 
 absRound f (Afloat (Just x)) =
     return $ Afloat $ Just $ fromIntegral $ f x

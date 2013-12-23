@@ -26,11 +26,20 @@ data ZoneS = ZoneS
     , zs_kids :: [ZoneS]
     }
     deriving (Show, Eq)
-zoneStoTvar z = do
-    newKids <- mapM zoneStoTvar (zs_kids z)
-    newAttrs <- atomically $ newTVar (zs_attrs z)
-    return Zone{z_attrs=newAttrs, z_kids=newKids}
 
+zoneStoTvar z = go z
+    where
+    go z = do
+        newKids <- mapM zoneStoTvar (zs_kids z)
+        newAttrs <- newTVar (zs_attrs z)
+        return Zone{z_attrs=newAttrs, z_kids=newKids}
+
+zoneTvarToS z = go z
+    where
+    go z = do
+        newKids <- mapM go (z_kids z)
+        newAttrs <- readTVar (z_attrs z)
+        return ZoneS{zs_attrs=newAttrs, zs_kids=newKids}
 
 type Contact = SockAddr
 
