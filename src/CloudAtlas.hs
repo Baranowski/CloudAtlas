@@ -391,7 +391,33 @@ rmiPerform (SetContacts cSs) = do
         servAddrs <- liftIO $ getAddrInfo Nothing (Just hS) (Just pS)
         when (null servAddrs) $ fail $ "Cannot find host or port: " ++ hS ++ ":" ++ pS
         return $ addrAddress $ head servAddrs
+rmiPerform (InstallQuery path name query) = do
+    case parseSingle query of
+        Left err -> return $ RmiErr $ show err
+        Right q -> actuallyInstall path name q
+    where
+    actuallyInstall path name q = embedSTM $ do
+        zs <- matchingZones_stm path
+        forM_ zs (go name q)
+        return RmiOk
+    go name q z = do
+        when (null $ z_kids z) $ fail "Cannot install query in a lowest-level zone"
+        attrs <- myRead (z_attrs z)
+        myWrite (z_attrs z) (M.insert name (Aquery $ Just q) attrs)
+rmiPerform (UninstallQuery path name) = embedSTM $ do
+    zs <- matchingZones_stm path
+    forM_ zs (go name)
+    return RmiOk
+    where
+    go name z = do
+        reqTyped_stm name (Aquery Nothing) z
+        attrs <- myRead (z_attrs z)
+        myWrite (z_attrs z) (M.delete name attrs)
 
+-- For (un)install query; skip lowest-level zones
+matchingZones_stm "*" = do
+    myself <- asks $ c_path . e_conf
+    mapM (getByPath_stm . (intercalate "/")) (inits $ init myself)
 
 getByPath_stm path = do
     res <- lookupPath_stm path

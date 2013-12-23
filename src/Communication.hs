@@ -268,6 +268,8 @@ data RemoteCall
     | GetBagOfZones
     | GetZoneAttrs String
     | SetZoneAttrs {sza_path:: String, sza_attrs::[(String, Attribute)]}
+    | InstallQuery {iq_path:: String, iq_name::String, iq_query::String}
+    | UninstallQuery {uq_path:: String, uq_name::String}
     deriving (Show)
 
 instance Serializable RemoteCall where
@@ -275,6 +277,8 @@ instance Serializable RemoteCall where
     serialize (GetBagOfZones) = [2]
     serialize (GetZoneAttrs s) = 3:(serialize s)
     serialize (SetZoneAttrs p l) = 4:(serialize p) ++ (serialize l)
+    serialize (InstallQuery p n q) = 5:(serialize (p,n,q))
+    serialize (UninstallQuery p n) = 6:(serialize (p,n))
 
     deserialize (1:xs) = do
         (l, xs) <- deserialize xs
@@ -288,17 +292,25 @@ instance Serializable RemoteCall where
         (p::String, xs) <- deserialize xs
         (l, xs) <- deserialize xs
         return (SetZoneAttrs p l, xs)
+    deserialize (5:xs) = do
+        ((p,n,q), xs) <- deserialize xs
+        return (InstallQuery p n q, xs)
+    deserialize (6:xs) = do
+        ((p,n), xs) <- deserialize xs
+        return (UninstallQuery p n, xs)
 
 data RemoteReturn
     = RmiOk
     | RmiZoneInfo [(String, Attribute)]
     | RmiBagOfZones [String]
+    | RmiErr String
     deriving (Show)
 
 instance Serializable RemoteReturn where
     serialize RmiOk = [1]
     serialize (RmiZoneInfo l) = 2:(serialize l)
     serialize (RmiBagOfZones l) = 3:(serialize l)
+    serialize (RmiErr e) = 4:(serialize e)
 
     deserialize (1:xs) = return (RmiOk, xs)
     deserialize (2:xs) = do
@@ -307,3 +319,6 @@ instance Serializable RemoteReturn where
     deserialize (3:xs) = do
         (l, xs) <- deserialize xs
         return (RmiBagOfZones l, xs)
+    deserialize (4:xs) = do
+        (e, xs) <- deserialize xs
+        return (RmiErr e, xs)

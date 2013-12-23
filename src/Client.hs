@@ -119,7 +119,6 @@ singleIter = do
     zpath <- asks zone_path
     id <- gets s_req_id
     newAttrs <- mapM findAttr attr_names
-    --liftIO $ putStrLn $ show newAttrs -- FIXME: debug
     sendMsg srv sock $ RmiReq id $ SetZoneAttrs zpath (concat newAttrs)
     modify $ \x -> x{s_req_id = (id+1)}
     where
@@ -257,6 +256,27 @@ process id serv sock ("set_contacts":cs) = do
             when (length l /= 2) $ fail $ "There should be exactly one colon in every contact specification"
             let [h,p] = l
             return (h,p)
+process id serv sock ("install_query":path:attrName:querys) = do
+    let query = intercalate " " querys
+    sendMsg serv sock (RmiReq id $ InstallQuery path attrName query)
+    msg <- getMsg sock
+    case msg of
+        RmiResp _ RmiOk -> do
+            liftIO $ putStrLn "OK"
+        RmiResp _ (RmiErr err) -> do
+            liftIO $ putStrLn err
+        _ -> do
+            fail "Unexpected response"
+    return (id+1)
+process id serv sock ("uninstall_query":path:attrName:[]) = do
+    sendMsg serv sock (RmiReq id $ UninstallQuery path attrName)
+    msg <- getMsg sock
+    case msg of
+        RmiResp _ RmiOk -> do
+            liftIO $ putStrLn "OK"
+        _ -> do
+            fail "Unexpected response"
+    return (id+1)
 process id serv sock ["quit"] = do
     liftIO $ sClose sock
     liftIO $ exitSuccess
@@ -266,6 +286,11 @@ process id serv sock _ = do
     liftIO $ putStrLn " - get_zones   - to get a list of all zones"
     liftIO $ putStrLn " - zone <path> - to list all of zone's attributes"
     liftIO $ putStrLn " - set_contacts <host1:port1> [ <host2:port2> [ ... ] ]- to set fallback contacts for an agent"
+    liftIO $ putStrLn ""
+    liftIO $ putStrLn " - install_query <zone> <query_name> <query> - to install a query in the specified zone"
+    liftIO $ putStrLn " - uninstall_query <zone> <query_name> - to uinstall a query from the specified zone"
+    liftIO $ putStrLn "   In the two commands above, <zone> might be '*' to denote all zones the agent belongs to"
+    liftIO $ putStrLn ""
     liftIO $ putStrLn " - quit"
     return id
 
