@@ -297,6 +297,21 @@ builtin "first" [nl, col] = do
         _ -> fail "Invalid numeric argument to 'first' or 'last'"
     return [Alist 0 (Just (take (fromIntegral n) col))]
 builtin "last" [nl, col] = builtin "first" [nl, reverse col]
+builtin "random" [nl, col] = do
+    n <- case nl of
+        [Aint (Just x)] -> return x
+        _ -> fail "Invalid numeric argument to 'random'"
+    inds <- makeInds (length col) (min n (fromIntegral $ length col)) []
+    return [Alist 0 $ Just $ map ((!!) col) inds]
+    where
+      makeInds bound 0 acc = return acc
+      makeInds bound n acc = do
+        g <- gets fst
+        let (i,newG) = randomR (0, bound-1) g
+        modify $ \(_,t) -> (newG,t)
+        if i `elem` acc
+            then makeInds bound n acc
+            else makeInds bound (n-1) (i:acc)
 builtin "count" [col] = return [Aint (Just $ fromIntegral $ length col)]
 builtin "min" [x:xs] = extremeCmp x xs LT
 builtin "max" [x:xs] = extremeCmp x xs GT
@@ -345,6 +360,9 @@ builtin "distinct" [col] = do
     foldM go [] col
     where
     go xs x = return $ xs `union` [x]
+builtin "now" [] = do
+    t <- gets snd
+    return [Atime $ Just t]
 builtin name [col] =
     mapM (aBuiltin name) col
 builtin name _ = fail $ "Function '" ++ name ++ "': unknown function or unsupported argument list"
