@@ -121,8 +121,9 @@ queries = do
 
 reqAttr_stm aN z = do
     as <- myRead (z_attrs z)
+    let n = M.lookup "name" as
     case M.lookup aN as of
-        Nothing -> fail $ "Required attribute " ++ aN ++ " does not exist"
+        Nothing -> fail $ "Required attribute " ++ aN ++ " does not exist" ++ " " ++ (show n)
         Just x -> return x
     
 reqTyped_stm aN aT z = do
@@ -417,7 +418,10 @@ rmiPerform (UninstallQuery path name) = embedSTM $ do
 -- For (un)install query; skip lowest-level zones
 matchingZones_stm "*" = do
     myself <- asks $ c_path . e_conf
-    mapM (getByPath_stm . (intercalate "/")) (inits $ init myself)
+    mapM (getByPath_stm . (intercalate "/")) (tail $ inits $ init myself)
+matchingZones_stm path = do
+    z <- getByPath_stm path
+    return [z]
 
 getByPath_stm path = do
     res <- lookupPath_stm path
@@ -425,6 +429,7 @@ getByPath_stm path = do
         Just z -> return z
         Nothing -> fail $ "Error looking up zone " ++ path
 
+lookupPath_stm "/" = lookupPath_stm ""
 lookupPath_stm path = do
     zsTvar <- asks e_zones
     let pathList = splitOn "/" path
@@ -445,6 +450,7 @@ lookupPath_stm path = do
             Just (Astr (Just s)) -> return (n==s)
             _ -> return False
 
+-- TODO: error w srodku powinien powodowac rollback
 embedSTM = hoist $ hoist atomically
 myRead = lift . lift . readTVar
 myWrite tv val= lift $ lift $ writeTVar tv val
