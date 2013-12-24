@@ -109,12 +109,12 @@ performNested (Qnested e whOld ordering) = do
     where
     evalQ kids = evalChk kids e
 
-
 checkCol [] = return ()
 checkCol [a] = return ()
-checkCol (a:b:xs) =
+checkCol (a:b:xs) = do
     when (not (sameType a b))
         (left "Type mismatch within single column")
+    checkCol (b:xs)
 
 checkCols cols = do
     forM_ cols checkCol
@@ -348,7 +348,7 @@ builtin "lor" [col] = do
     where
     isTrue x = x == Abool (Just True)
 builtin "epoch" [] = return [Atime (Just epoch)]
-builtin "unfold" [col] = do
+builtin "unfold" [col] = do -- TODO FIXME
     res <- mapM go col
     return $ concat res
     where

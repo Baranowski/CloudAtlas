@@ -351,7 +351,7 @@ processMsg (ZInfo (t1a,t1b,t2b) p l) client = do
             myWrite (z_attrs z) ((M.fromList l) `M.union` oldAttrs)
 
 processMsg (RmiReq reqId req) client = do
-    resp <- rmiPerform req
+    resp <- rmiPerform req `catchError` (\e -> return $ RmiErr e)
     sendMsg client (RmiResp reqId resp)
 
 rmiPerform GetBagOfZones = do

@@ -226,8 +226,7 @@ process id serv sock ["get_zones"] = do
     case msg of
         RmiResp _ (RmiBagOfZones zs) -> do
             liftIO $ zs `forM_` putStrLn
-        _ -> do
-            fail "Unexpected response"
+        x -> reportRmiResponse x
     return (id+1)
 process id serv sock ["zone", path] = do
     sendMsg serv sock (RmiReq id $ GetZoneAttrs path)
@@ -235,8 +234,7 @@ process id serv sock ["zone", path] = do
     case msg of
         RmiResp _ (RmiZoneInfo l) -> do
             liftIO $ l `forM_` (putStrLn . showAttr)
-        _ -> do
-            fail "Unexpected response"
+        x -> reportRmiResponse x
     return (id+1)
     where
         showAttr (name, attr) = name ++ ": " ++ (printAType attr) ++ " = " ++ (printAVal attr)
@@ -244,11 +242,7 @@ process id serv sock ("set_contacts":cs) = do
     splitCs <- mapM go cs
     sendMsg serv sock (RmiReq id $ SetContacts splitCs)
     msg <- getMsg sock
-    case msg of
-        RmiResp _ RmiOk -> do
-            liftIO $ putStrLn "OK"
-        _ -> do
-            fail "Unexpected response"
+    reportRmiResponse msg
     return (id+1)
     where
         go s = do
@@ -260,22 +254,12 @@ process id serv sock ("install_query":path:attrName:querys) = do
     let query = intercalate " " querys
     sendMsg serv sock (RmiReq id $ InstallQuery path attrName query)
     msg <- getMsg sock
-    case msg of
-        RmiResp _ RmiOk -> do
-            liftIO $ putStrLn "OK"
-        RmiResp _ (RmiErr err) -> do
-            liftIO $ putStrLn err
-        _ -> do
-            fail "Unexpected response"
+    reportRmiResponse msg
     return (id+1)
 process id serv sock ("uninstall_query":path:attrName:[]) = do
     sendMsg serv sock (RmiReq id $ UninstallQuery path attrName)
     msg <- getMsg sock
-    case msg of
-        RmiResp _ RmiOk -> do
-            liftIO $ putStrLn "OK"
-        _ -> do
-            fail "Unexpected response"
+    reportRmiResponse msg
     return (id+1)
 process id serv sock ["quit"] = do
     liftIO $ sClose sock
@@ -293,6 +277,15 @@ process id serv sock _ = do
     liftIO $ putStrLn ""
     liftIO $ putStrLn " - quit"
     return id
+
+reportRmiResponse resp =
+    case resp of
+        RmiResp _ RmiOk -> do
+            liftIO $ putStrLn  "OK"
+        RmiResp _ (RmiErr e) -> do
+            liftIO $ putStrLn e
+        _ -> do
+            liftIO $ putStrLn "Unexpected response"
 
 sendMsg serv sock msg = do
     let packet = addHeader my_port $ serialize msg
