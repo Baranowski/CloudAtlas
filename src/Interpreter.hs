@@ -18,22 +18,39 @@ import QAT
 
 type IerSt = (StdGen, UTCTime)
 performQueries :: ZoneS -> WriterT [String] (StateT IerSt Identity) ZoneS
+performQueries z@(ZoneS attribs []) = return z
 performQueries z@(ZoneS attribs children) = do
     newKids <- mapM performQueries children
-    let atL = map snd (M.toList attribs)
+    let atL = M.elems attribs
     let queries = map getQuery (filter isNonNullQuery atL)
     newAttrsNested <- mapM (singleQuery newKids) queries
     let newAttrs = concat newAttrsNested
-    let updatedAttrs = (M.fromList newAttrs) `M.union` attribs
+    specialAttrs <- special attribs newKids
+    let updatedAttrs = specialAttrs `M.union` (M.fromList newAttrs)
     return $ ZoneS updatedAttrs newKids
     where
-        singleQuery newKids q = do
-            res <- lift $ runErrorT $ runReaderT (performQ q) newKids
-            case res of
-                Left err -> do
-                    tell [err]
-                    return []
-                Right x -> return x
+    special attrs newKids = do
+        let filtered = (M.filterWithKey isSpecial attrs)
+        t <- gets snd
+        contactAttrs <- singleQuery newKids contactQ
+        let computed = ("freshness", Atime $ Just t):contactAttrs
+        let specials = filtered `M.union` (M.fromList computed)
+        return specials
+        where
+        isSpecial n (Aquery _) = True
+        isSpecial n _ = n `elem` [ "timestamp"
+                                 , "owner"
+                                 , "name"
+                                 , "level"
+                                 ]
+    contactQ = QAT [Qsel (Eapp "random" [Eint 3, Eapp "unfold" [Evar "contacts"]]) "contacts"] Nothing []
+    singleQuery newKids q = do
+        res <- lift $ runErrorT $ runReaderT (performQ q) newKids
+        case res of
+            Left err -> do
+                tell [err]
+                return []
+            Right x -> return x
 
 type Interpretation res = ReaderT [ZoneS] (ErrorT String (StateT IerSt Identity)) res
 

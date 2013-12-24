@@ -283,7 +283,7 @@ reportRmiResponse resp =
         RmiResp _ RmiOk -> do
             liftIO $ putStrLn  "OK"
         RmiResp _ (RmiErr e) -> do
-            liftIO $ putStrLn e
+            liftIO $ putStrLn $ "Error reported by agent: " ++ e
         _ -> do
             liftIO $ putStrLn "Unexpected response"
 
