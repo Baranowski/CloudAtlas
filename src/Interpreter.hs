@@ -15,6 +15,7 @@ import Text.Regex.Posix
 
 import Zones
 import QAT
+import Utils
 
 type IerSt = (StdGen, UTCTime)
 performQueries :: ZoneS -> WriterT [String] (StateT IerSt Identity) ZoneS
@@ -111,8 +112,9 @@ performAbs eval whOld ordering = do
     eval kids
 
 performQ :: QAT -> Interpretation [(String, Attribute)]
-performQ (QAT sels whOld ordering) = do
+performQ q@(QAT sels whOld ordering) = (do
     performAbs evalQ whOld ordering
+    ) `addTrace` ("in query: " ++ (show q))
     where
     evalQ kids = mapM (evalSel kids) sels
     evalSel kids (Qsel e n) = do
@@ -130,7 +132,7 @@ checkCol [] = return ()
 checkCol [a] = return ()
 checkCol (a:b:xs) = do
     when (not (sameType a b))
-        (left "Type mismatch within single column")
+        (left $ "Type mismatch within single column (" ++ (printAType a) ++ " and " ++ (printAType b) ++ ")")
     checkCol (b:xs)
 
 checkCols cols = do
@@ -319,7 +321,7 @@ builtin "random" [nl, col] = do
         [Aint (Just x)] -> return x
         _ -> fail "Invalid numeric argument to 'random'"
     inds <- makeInds (length col) (min n (fromIntegral $ length col)) []
-    return [Alist 0 $ Just $ map ((!!) col) inds]
+    return [Aset 0 $ Just $ map ((!!) col) inds]
     where
       makeInds bound 0 acc = return acc
       makeInds bound n acc = do

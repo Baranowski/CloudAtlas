@@ -6,8 +6,6 @@ import System.Exit
 import System.Environment
 import System.Random
 import qualified Data.Map as M
-import Data.Word
-import Data.Bits
 import Data.Time.Clock
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -21,12 +19,9 @@ import Control.Monad.Morph
 import Concurrency
 import qualified Hardcoded
 import Zones
-import QAT
 import Interpreter
-import Communication
 import Gossip
 import ServerConfig
-import Parser
 import Listener
 
 panic msg = do
@@ -46,13 +41,14 @@ main = do
         ['-':_] -> unknown
         [confPath] -> return confPath
         _ -> unknown
-    h_zones <- atomically $ zoneStoTvar Hardcoded.zones
-    new_zones <- atomically $ newTVar h_zones
-    contacts <- atomically $ newTVar []
     conf <- readConfig confPath
     conf <- case conf of
         Left x -> panic $ "readConfig: " ++ (snd x)
         Right x -> return x
+    h_zones <- atomically $ zoneStoTvar
+               (relevant (c_path conf) Hardcoded.zones)
+    new_zones <- atomically $ newTVar h_zones
+    contacts <- atomically $ newTVar []
     let env = Env { e_zones = new_zones
                   , e_contacts = contacts
                   , e_conf = conf
@@ -76,3 +72,12 @@ queries = do
     delay <- asks $ c_qu_fr . e_conf
     liftIO $ threadDelay delay
     queries
+
+relevant (n:ns) z = ZoneS (zs_attrs z) newKids
+    where
+    newKids = if (zN == n)
+        then map (relevant ns) (zs_kids z)
+        else []
+    zN = case (M.lookup "name" (zs_attrs z)) of
+        Just (Astr (Just x)) -> x
+        _ -> ""
