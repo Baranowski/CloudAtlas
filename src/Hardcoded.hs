@@ -18,41 +18,6 @@ zones =
     ]) [
         (ZoneS (M.fromList
         [ ("level", Aint (Just 1))
-        , ("name", Astr (Just "fake"))
-        , ("owner", Astr (Just "/uw/violet07"))
-        , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))
-        , ("freshness", Atime (Just $ timeFromStr "2000/01/01 12:00:00.000"))
-        , ("contacts", Aset 0 Nothing)
-        , ("cardinality", Aint (Just 0))
-        ]) [
-            (ZoneS (M.fromList
-            [ ("level", Aint (Just 1))
-            , ("name", Astr (Just "fake1"))
-            , ("owner", Astr (Just "/uw/violet07"))
-            , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))
-            , ("freshness", Atime (Just $ timeFromStr "2000/01/01 12:00:00.000"))
-            , ("contacts", Aset 0 Nothing)
-            , ("cardinality", Aint (Just 0))
-            , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
-            , ("creation", Atime (Just $ timeFromStr "2011/11/09 20:08:13.123"))
-            , ("cpu_usage", Afloat (Just 0.9))
-            , ("num_cores", Aint (Just 3))
-            , ("has_ups", Abool Nothing)
-            , ("some_names", Alist 3 (Just [(Astr (Just "tola")), (Astr (Just "tosia"))]))
-            , ("expiry", Aduration (durFromStr "+13 12:00:00.000"))
-            ]) [ ]),
-            (ZoneS (M.fromList
-            [ ("level", Aint (Just 1))
-            , ("name", Astr (Just "fake2"))
-            , ("owner", Astr (Just "/uw/violet07"))
-            , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))
-            , ("freshness", Atime (Just $ timeFromStr "2000/01/01 12:00:00.000"))
-            , ("contacts", Aset 0 Nothing)
-            , ("cardinality", Aint (Just 0))
-            ]) [ ])
-        ]),
-        (ZoneS (M.fromList
-        [ ("level", Aint (Just 1))
         , ("name", Astr (Just "uw"))
         , ("owner", Astr (Just "/uw/violet07"))
         , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))

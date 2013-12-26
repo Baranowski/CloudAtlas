@@ -71,8 +71,11 @@ lookupContacts myName shortPath = do
             then return []
             else do
                 let (pos,_) = randomR (0, (length kids)-1) g
-                (Aset _ (Just l)) <- reqTyped_stm "contacts" (Aset 0 Nothing) (kids !! pos)
-                return $ concatMap strip l
+                cAttr <- reqAttr_stm "contacts"  (siblings !! pos)
+                case cAttr of
+                    (Aset _ (Just l)) -> return $ concatMap strip l
+                    (Aset _ Nothing) -> return []
+                    _ -> fail "Unrecognized type for attribute: contacts"
 
     where
     strip (Acontact (Just c)) = [c]
