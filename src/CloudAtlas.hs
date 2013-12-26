@@ -66,7 +66,7 @@ setContact = embedSTM $ do
     let c = (hostS, portS)
     z <- getByPath_stm (intercalate "/" myself)
     attrs <- myRead (z_attrs z)
-    myWrite (z_attrs z) (M.insert "contacts" (Alist 0 (Just [Acontact $ Just c])) attrs)
+    myWrite (z_attrs z) (M.insert "contacts" (Aset 0 (Just [Acontact $ Just c])) attrs)
 
 queries = do
     zTv <- asks e_zones
