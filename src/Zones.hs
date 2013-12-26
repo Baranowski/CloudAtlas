@@ -159,7 +159,7 @@ instance MyShow Double where
 instance MyShow QAT where
     myshow x = show x
 instance MyShow Contact where
-    myshow x = show x
+    myshow (h,p) = h ++ ":" ++ p
 
 pMb Nothing = "NULL"
 pMb (Just x) = myshow x
