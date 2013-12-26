@@ -25,9 +25,6 @@ import Text.Regex.Posix
 import Communication
 import Zones
 
-my_port :: PortNumber
-my_port = 12345
-
 main = do
     args <- getArgs
     case args of
@@ -195,7 +192,7 @@ openSocket hostS portS = do
     when (null servAddrs) $ panic $ "Cannot find host or port: " ++ hostS ++ ":" ++ portS
     let servAddr = head servAddrs
     sock <- socket (addrFamily servAddr) Datagram defaultProtocol
-    bindSocket sock (SockAddrInet my_port iNADDR_ANY)
+    bindSocket sock (SockAddrInet 0 iNADDR_ANY)
     return (addrAddress servAddr, sock)
 
 interactive s = do
@@ -283,6 +280,7 @@ reportRmiResponse resp =
             liftIO $ putStrLn "Unexpected response"
 
 sendMsg serv sock msg = do
+    my_port <- liftIO $ socketPort sock
     let packet = addHeader my_port $ serialize msg
     sent <- liftIO $ sendTo sock (B.pack packet) serv
     when (sent < (length packet))
