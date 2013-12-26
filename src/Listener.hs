@@ -7,6 +7,7 @@ import Control.Monad.Reader
 import qualified Data.ByteString as B
 import Data.List
 import qualified Data.Map as M
+import Data.Time.Clock
 import Data.Word
 import Network.Socket hiding (recvFrom, sendTo, listen)
 import Network.Socket.ByteString
@@ -44,6 +45,7 @@ maxLine = 20000
 handleMsg ::  [Word8] -> SockAddr -> ReaderT Env (ErrorT String IO) ()
 handleMsg mesg sender = do
     (msg, client) <- lift $ hoist generalizeId $ go mesg sender
+    when debug (liftIO $ hPutStrLn stderr $ "Received msg: \n  " ++ (show msg) ++ "\n  from: " ++ (show client))
     processMsg msg client
     where
       go mesg sender = do
@@ -67,6 +69,8 @@ processMsg (FreshnessResponse (t1a,t1b,t2b) fr) client = do
     t2a <- liftIO $ myCurrentTime
     sendUpdate client fr (t1a,t1b,t2b,t2a)
 processMsg (ZInfo (t1a,t1b,t2b) p l) client = do
+    myPath <- asks $ (intercalate "/") . c_path . e_conf
+    when (p == myPath) $ fail "Refuse to update myself by gossiping"
     t2a <- liftIO $ myCurrentTime
     embedSTM $ do
         z <- getByPath_stm p
@@ -108,11 +112,14 @@ rmiPerform (GetZoneAttrs path) = do
         return $ M.toList attrs
     return $ RmiZoneInfo res
 rmiPerform (SetZoneAttrs attrs) = do
+    t <- liftIO $ getCurrentTime
     embedSTM $ do
         path <- asks $ c_path . e_conf
         z <- getByPath_stm (intercalate "/" path)
         oldAttrs <- myRead (z_attrs z)
-        myWrite (z_attrs z) ((M.fromList attrs) `M.union` oldAttrs)
+        let newAttrs = (M.fromList attrs) `M.union` oldAttrs
+        let freshAttrs = M.insert "freshness" (Atime $ Just t) newAttrs
+        myWrite (z_attrs z) freshAttrs
     return RmiOk
 rmiPerform (SetContacts cSs) = do
     csTvar <- asks e_contacts
@@ -159,7 +166,7 @@ mkFreshness = embedSTM $ do
             let newPath = path ++ [n]
             (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
             res <- mapM (go newPath) (z_kids z)
-            let sPath = concat $ map ("/"++) newPath
+            let sPath = intercalate "/" newPath
             return $ (sPath, timeToTimestamp f):(concat res)
 
 sendUpdate client (Freshness fr) times@(t1a,t1b,t2b,t2a) = do

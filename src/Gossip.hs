@@ -43,17 +43,23 @@ myTry = try
 oneGossip :: StateT GossipSt (ReaderT Env (ErrorT String IO)) ()
 oneGossip = do
     i <- selectLevel
-    liftIO $ putStrLn $ show i
     myself <- asks $ c_path . e_conf
     let shortPath = concat $ intersperse "/" (take (i+1) myself)
     let myName = myself !! (i+1)
     cs <- lookupContacts myName shortPath
+    cs <- filterOutMyself cs
     g <- liftIO $ newStdGen
     cs <- fallbackContacts cs
+    cs <- filterOutMyself cs
     when (null cs) $ fail "Contacts list is empty"
     let (ind,_) = randomR (0, (length cs)-1) g
     let contact = cs !! ind
     initGossip contact 
+
+filterOutMyself cs = do
+    hS <- asks $ c_host . e_conf
+    pS <- asks $ show . c_port . e_conf
+    return $ filter (/=(hS,pS)) cs
 
 lookupContacts myName shortPath = do
     g <- liftIO $ newStdGen
@@ -66,7 +72,11 @@ lookupContacts myName shortPath = do
             else do
                 let (pos,_) = randomR (0, (length kids)-1) g
                 (Aset _ (Just l)) <- reqTyped_stm "contacts" (Aset 0 Nothing) (kids !! pos)
-                return l
+                return $ concatMap strip l
+
+    where
+    strip (Acontact (Just c)) = [c]
+    strip _ =  []
 
 hasContacts_stm z = do
     attrs <- myRead (z_attrs z)
@@ -84,10 +94,7 @@ fallbackContacts cs = case cs of
     [] -> do
         csTv <- asks e_contacts
         lift $ embedSTM $ myRead csTv
-    _ -> return (concatMap getC cs)
-         where
-           getC (Acontact (Just c)) = [c]
-           getC _ =  []
+    x -> return x
 
 selectLevel = do
     strt <- asks $ c_g_strategy . e_conf
