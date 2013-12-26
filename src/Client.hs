@@ -48,14 +48,12 @@ data Config = Config { host_name :: String
                      , port_name :: String
                      , updateInterval :: Int
                      , avgInterval :: Double
-                     , zone_path :: String
                      }
 readConfig path = do
     rv <- runErrorT $ do
         cp <- M.join $ liftIO $ C.readfile C.emptyCP path
         hostS <- C.get cp "Remote" "host"
         portS <- C.get cp "Remote" "port"
-        path <- C.get cp "Remote" "zone"
 
         uIS <- C.get cp "Local" "updates"
         aIS <- C.get cp "Local" "averages"
@@ -63,7 +61,6 @@ readConfig path = do
                         , port_name = portS
                         , updateInterval = uIS * 1000 * 1000
                         , avgInterval = aIS
-                        , zone_path = path
                         }
     case rv of
         Left x -> do
