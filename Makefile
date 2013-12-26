@@ -1,2 +1,3 @@
 all:
-	ghc --make -o CloudAtlas -isrc src/CloudAtlas.hs
+	mkdir -p bin
+	cabal install --bindir bin

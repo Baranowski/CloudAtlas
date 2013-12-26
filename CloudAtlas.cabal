@@ -40,6 +40,7 @@ build-type:          Simple
 
 -- Constraint on the version of Cabal needed to build this package.
 cabal-version:       >=1.8
+data-files:          client.ini, server.ini
 
 
 executable CloudAtlas
@@ -81,3 +82,4 @@ executable Client
   
   -- Directories containing source files.
   hs-source-dirs:      src
+
