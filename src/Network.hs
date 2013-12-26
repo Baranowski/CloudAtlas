@@ -1,4 +1,4 @@
-module Network(sendMsg) where
+module Network(sendMsg, resolveHost) where
 
 import Control.Monad.Reader
 
@@ -19,3 +19,7 @@ sendMsg client msg = do
     when (sent < (length msgB))
          (fail $ "Sent " ++ (show sent) ++ " bytes instead of " ++ (show $ length msgB))
 
+resolveHost (hS,pS) = do
+    servAddrs <- liftIO $ getAddrInfo Nothing (Just hS) (Just pS)
+    when (null servAddrs) $ fail $ "Cannot find host or port: " ++ hS ++ ":" ++ pS
+    return $ addrAddress $ head servAddrs

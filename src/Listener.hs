@@ -5,6 +5,7 @@ import Control.Monad.Error
 import Control.Monad.Morph
 import Control.Monad.Reader
 import qualified Data.ByteString as B
+import Data.List
 import qualified Data.Map as M
 import Data.Word
 import Network.Socket hiding (recvFrom, sendTo, listen)
@@ -106,22 +107,17 @@ rmiPerform (GetZoneAttrs path) = do
         attrs <- myRead $ z_attrs z
         return $ M.toList attrs
     return $ RmiZoneInfo res
-rmiPerform (SetZoneAttrs path attrs) = do
+rmiPerform (SetZoneAttrs attrs) = do
     embedSTM $ do
-        z <- getByPath_stm path
+        path <- asks $ c_path . e_conf
+        z <- getByPath_stm (intercalate "/" path)
         oldAttrs <- myRead (z_attrs z)
         myWrite (z_attrs z) ((M.fromList attrs) `M.union` oldAttrs)
     return RmiOk
 rmiPerform (SetContacts cSs) = do
-    cs <- mapM resolve cSs
     csTvar <- asks e_contacts
-    embedSTM $ myWrite csTvar cs
+    embedSTM $ myWrite csTvar cSs
     return RmiOk
-    where
-    resolve (hS,pS) = do
-        servAddrs <- liftIO $ getAddrInfo Nothing (Just hS) (Just pS)
-        when (null servAddrs) $ fail $ "Cannot find host or port: " ++ hS ++ ":" ++ pS
-        return $ addrAddress $ head servAddrs
 rmiPerform (InstallQuery path name query) = do
     case parseSingle query of
         Left err -> return $ RmiErr $ show err

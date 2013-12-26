@@ -13,7 +13,6 @@ import Data.List
 import Text.Printf
 import Text.Parsec.String
 import Control.Concurrent.STM
-import Network.Socket
 
 type ZoneInfo = M.Map String Attribute
 data Zone = Zone
@@ -41,7 +40,7 @@ zoneTvarToS z = go z
         newAttrs <- readTVar (z_attrs z)
         return ZoneS{zs_attrs=newAttrs, zs_kids=newKids}
 
-type Contact = SockAddr
+type Contact = (String, String)
 
 data Attribute
     = Aint (Maybe Integer)
@@ -51,7 +50,7 @@ data Attribute
     | Alist Int (Maybe [Attribute])
     | Abool (Maybe Bool)
     | Aquery (Maybe QAT)
-    | Acontact (Maybe SockAddr)
+    | Acontact (Maybe Contact)
     | Aduration (Maybe Integer)
     | Afloat (Maybe Double)
     deriving (Show, Eq)
@@ -159,7 +158,7 @@ instance MyShow Double where
     myshow x = show x
 instance MyShow QAT where
     myshow x = show x
-instance MyShow SockAddr where
+instance MyShow Contact where
     myshow x = show x
 
 pMb Nothing = "NULL"

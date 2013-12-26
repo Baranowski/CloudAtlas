@@ -7,6 +7,7 @@ import System.Environment
 import System.Random
 import qualified Data.Map as M
 import Data.Time.Clock
+import Data.List
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad.Reader
@@ -53,9 +54,19 @@ main = do
                   , e_contacts = contacts
                   , e_conf = conf
                   }
+    runErrorT $ runReaderT setContact env
     forkIO $ runReaderT gossiping env
     forkIO $ runReaderT queries env
     Listener.listen env
+
+setContact = embedSTM $ do
+    myself <- asks $ c_path . e_conf
+    portS <- asks $ show . c_port . e_conf
+    hostS <- asks $ c_host . e_conf
+    let c = (hostS, portS)
+    z <- getByPath_stm (intercalate "/" myself)
+    attrs <- myRead (z_attrs z)
+    myWrite (z_attrs z) (M.insert "contacts" (Alist 0 (Just [Acontact $ Just c])) attrs)
 
 queries = do
     zTv <- asks e_zones

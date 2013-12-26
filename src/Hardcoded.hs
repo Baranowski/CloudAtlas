@@ -5,7 +5,7 @@ import Network.Socket
 import qualified Data.Map as M
 import Zones
 
-defContact = SockAddrInet (PortNum 12345) ((127 `shiftR` 24) + 1)
+defContact = ("10.0.0.1", "12345")
 zones =
     ZoneS (M.fromList
     [ ("level", Aint (Just 0))
@@ -28,7 +28,7 @@ zones =
             , ("name", Astr (Just "fake1"))
             , ("owner", Astr (Just "/uw/violet07"))
             , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:08:13.123"))
-            , ("contacts", Aset 3 (Just [(Acontact (Just defContact)), (Acontact (Just defContact)), (Acontact (Just defContact))]))
+            , ("contacts", Aset 0 Nothing)
             , ("cardinality", Aint (Just 0))
             , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
             , ("creation", Atime (Just $ timeFromStr "2011/11/09 20:08:13.123"))
@@ -60,7 +60,7 @@ zones =
             , ("name", Astr (Just "violet07"))
             , ("owner", Astr (Just "/uw/violet07"))
             , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 18:00:00.000"))
-            , ("contacts", Aset 3 (Just [(Acontact (Just defContact)), (Acontact (Just defContact)), (Acontact (Just defContact))]))
+            , ("contacts", Aset 0 Nothing)
             , ("cardinality", Aint (Just 1))
             , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
             , ("creation", Atime (Just $ timeFromStr "2011/11/09 20:08:13.123"))
@@ -75,7 +75,7 @@ zones =
             , ("name", Astr (Just "khaki31"))
             , ("owner", Astr (Just "/uw/khaki31"))
             , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 20:03:00.000"))
-            , ("contacts", Aset 3 (Just [(Acontact (Just defContact))]))
+            , ("contacts", Aset 0 Nothing)
             , ("cardinality", Aint (Just 1))
             , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
             , ("creation", Atime (Just $ timeFromStr "2011/11/09 20:12:13.123"))
@@ -90,7 +90,7 @@ zones =
             , ("name", Astr (Just "khaki13"))
             , ("owner", Astr (Just "/uw/khaki13"))
             , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 21:03:00.000"))
-            , ("contacts", Aset 3 (Just [(Acontact (Just defContact)), (Acontact (Just defContact))]))
+            , ("contacts", Aset 0 Nothing)
             , ("cardinality", Aint (Just 1))
             , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
             , ("creation", Atime Nothing)
@@ -114,7 +114,7 @@ zones =
             , ("name", Astr (Just "whatever01"))
             , ("owner", Astr (Just "/pjwstk/whatever01"))
             , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 21:12:00.000"))
-            , ("contacts", Aset 3 (Just [(Acontact (Just defContact))]))
+            , ("contacts", Aset 0 Nothing)
             , ("cardinality", Aint (Just 1))
             , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
             , ("creation", Atime (Just $ timeFromStr "2012/10/18 07:03:00.000"))
@@ -127,7 +127,7 @@ zones =
             , ("name", Astr (Just "whatever02"))
             , ("owner", Astr (Just "/pjwstk/whatever02"))
             , ("timestamp", Atime (Just $ timeFromStr "2012/11/09 21:13:00.000"))
-            , ("contacts", Aset 3 (Just [(Acontact (Just defContact))]))
+            , ("contacts", Aset 0 Nothing)
             , ("cardinality", Aint (Just 1))
             , ("members", Aset 3 (Just [(Acontact (Just defContact))]))
             , ("creation", Atime (Just $ timeFromStr "2012/10/18 07:04:00.000"))

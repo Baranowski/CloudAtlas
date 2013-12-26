@@ -52,8 +52,8 @@ oneGossip = do
     cs <- fallbackContacts cs
     when (null cs) $ fail "Contacts list is empty"
     let (ind,_) = randomR (0, (length cs)-1) g
-    let sAddr = cs !! ind
-    initGossip sAddr
+    let contact = cs !! ind
+    initGossip contact 
 
 lookupContacts myName shortPath = do
     g <- liftIO $ newStdGen
@@ -129,6 +129,7 @@ runErrWithPrint m = do
             fail err
         Right x -> return x
 
-initGossip client = do
+initGossip contact = do
+    client <- resolveHost contact
     now <- liftIO $ myCurrentTime
     sendMsg client (FreshnessPre now)

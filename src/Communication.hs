@@ -264,10 +264,10 @@ instance Serializable QAT where
         return (q, xs)
 
 data RemoteCall
-    = SetContacts [(String, String)]
+    = SetContacts [Contact]
     | GetBagOfZones
     | GetZoneAttrs String
-    | SetZoneAttrs {sza_path:: String, sza_attrs::[(String, Attribute)]}
+    | SetZoneAttrs [(String, Attribute)]
     | InstallQuery {iq_path:: String, iq_name::String, iq_query::String}
     | UninstallQuery {uq_path:: String, uq_name::String}
     deriving (Show)
@@ -276,7 +276,7 @@ instance Serializable RemoteCall where
     serialize (SetContacts cs) = 1:(serialize cs)
     serialize (GetBagOfZones) = [2]
     serialize (GetZoneAttrs s) = 3:(serialize s)
-    serialize (SetZoneAttrs p l) = 4:(serialize p) ++ (serialize l)
+    serialize (SetZoneAttrs l) = 4:(serialize l)
     serialize (InstallQuery p n q) = 5:(serialize (p,n,q))
     serialize (UninstallQuery p n) = 6:(serialize (p,n))
 
@@ -289,9 +289,8 @@ instance Serializable RemoteCall where
         (p::String, xs) <- deserialize xs
         return (GetZoneAttrs p, xs)
     deserialize (4:xs) = do
-        (p::String, xs) <- deserialize xs
         (l, xs) <- deserialize xs
-        return (SetZoneAttrs p l, xs)
+        return (SetZoneAttrs l, xs)
     deserialize (5:xs) = do
         ((p,n,q), xs) <- deserialize xs
         return (InstallQuery p n q, xs)

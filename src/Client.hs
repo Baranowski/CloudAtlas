@@ -33,16 +33,17 @@ main = do
     case args of
         ['-':_] -> unknown
         ["help"] -> unknown
-        [configPath] -> daemon configPath
-        [hostS, portS] -> interactive hostS portS
+        [s] -> if ':' `elem` s
+                then interactive s
+                else daemon s
         _ -> unknown
 
 unknown = do
     p <- getProgName
     hPutStrLn stderr "Usage: "
-    hPutStrLn stderr $ "   " ++ p ++ " [config file]"
+    hPutStrLn stderr $ "   " ++ p ++ " <config file>"
     hPutStrLn stderr $ "       For daemon mode"
-    hPutStrLn stderr $ "   " ++ p ++ " [host name] [port]"
+    hPutStrLn stderr $ "   " ++ p ++ " <host name>:<port>"
     hPutStrLn stderr $ "       For interactive mode"
     exitFailure
 
@@ -116,10 +117,9 @@ singleIter :: ReaderT Config (StateT MyState (ErrorT String IO)) ()
 singleIter = do
     srv <- gets s_server
     sock <- gets s_socket
-    zpath <- asks zone_path
     id <- gets s_req_id
     newAttrs <- mapM findAttr attr_names
-    sendMsg srv sock $ RmiReq id $ SetZoneAttrs zpath (concat newAttrs)
+    sendMsg srv sock $ RmiReq id $ SetZoneAttrs (concat newAttrs)
     modify $ \x -> x{s_req_id = (id+1)}
     where
         attr_names = [ "cpu_load" 
@@ -198,7 +198,8 @@ openSocket hostS portS = do
     bindSocket sock (SockAddrInet my_port iNADDR_ANY)
     return (addrAddress servAddr, sock)
 
-interactive hostS portS = do
+interactive s = do
+    Right (hostS, portS) <- runErrorT $ (parseContact s) `catchError` (lift . panic)
     (servAddr, sock) <- openSocket hostS portS
     res <- runErrorT (loop 1 servAddr sock)
     case res of
@@ -239,17 +240,11 @@ process id serv sock ["zone", path] = do
     where
         showAttr (name, attr) = name ++ ": " ++ (printAType attr) ++ " = " ++ (printAVal attr)
 process id serv sock ("set_contacts":cs) = do
-    splitCs <- mapM go cs
+    splitCs <- mapM parseContact cs
     sendMsg serv sock (RmiReq id $ SetContacts splitCs)
     msg <- getMsg sock
     reportRmiResponse msg
     return (id+1)
-    where
-        go s = do
-            let l = splitOn ":" s
-            when (length l /= 2) $ fail $ "There should be exactly one colon in every contact specification"
-            let [h,p] = l
-            return (h,p)
 process id serv sock ("install_query":path:attrName:querys) = do
     let query = intercalate " " querys
     sendMsg serv sock (RmiReq id $ InstallQuery path attrName query)
@@ -292,3 +287,9 @@ sendMsg serv sock msg = do
     sent <- liftIO $ sendTo sock (B.pack packet) serv
     when (sent < (length packet))
          (fail $ "Sent " ++ (show sent) ++ " bytes instead of " ++ (show $ length packet))
+
+parseContact s = do
+    let l = splitOn ":" s
+    when (length l /= 2) $ fail $ "There should be exactly one colon in every contact specification"
+    let [h,p] = l
+    return (h,p)
