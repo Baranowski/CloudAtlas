@@ -206,11 +206,11 @@ eval zs (Eadd e ops) = do
         return $ Aset 0 Nothing
     go op (Aint (Just x)) (Aint (Just y)) =
         return $ Aint (Just ((oper op) x y))
-    go op (Aint Nothing) (Aint Nothing) =
+    go op (Aint _) (Aint _) =
         return $ Aint Nothing
     go op (Afloat (Just x)) (Afloat (Just y)) =
         return $ Afloat (Just ((oper op) x y))
-    go op (Afloat Nothing) (Afloat Nothing) =
+    go op (Afloat _) (Afloat _) =
         return $ Afloat Nothing
     go _ _ _ =
         left "Additive operation for unsupported types"
