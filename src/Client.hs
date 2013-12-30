@@ -24,6 +24,7 @@ import Text.Regex.Posix
 
 import Communication
 import Zones
+import Utils
 
 main = do
     args <- getArgs
@@ -128,10 +129,13 @@ singleIter = do
 findAttr "cpu_load" = do
     delay <- asks avgInterval
     output <- liftIO $ myReadProcess "top" ["-b", "-n", "2", "-d", show delay] ""
-    let s :: [[String]] = output =~ "Cpu\\(s\\): [^\n]+ ([0-9]+.[0-9]*)%id"
-    let idle = read $ (s !! 1) !! 1
+    let s :: [[String]] = output =~ pattern
+    let idle = read $ ((s !! 1) !! 1) ++ "." ++ ((s !! 1) !! 2)
     let load = (100.0 - idle) / 100.0
     return [("cpu_load", Afloat $ Just load)]
+    where
+    --pattern = "Cpu\\(s\\): [^\n]+ ([0-9]+.[0-9]*)%id"
+    pattern = "Cpu\\(s\\): [^\n]+ ([0-9]+),([0-9]*) id"
 findAttr "disk" = do
     output <- liftIO $ myReadProcess "df" ["--total", "-l"] ""
     let s :: [[String]] = output =~ "total [^0-9]+([0-9]+)[^0-9]+[0-9]+[^0-9]+([0-9]+)[^0-9]"
