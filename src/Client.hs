@@ -185,7 +185,7 @@ panic msg = do
     exitFailure
 
 openSocket hostS portS = do
-    servAddrs <- getAddrInfo Nothing (Just hostS) (Just portS)
+    servAddrs <- getAddrInfo (Just $ defaultHints{addrFamily=AF_INET}) (Just hostS) (Just portS)
     when (null servAddrs) $ panic $ "Cannot find host or port: " ++ hostS ++ ":" ++ portS
     let servAddr = head servAddrs
     sock <- socket (addrFamily servAddr) Datagram defaultProtocol
