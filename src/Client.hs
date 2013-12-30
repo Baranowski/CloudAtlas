@@ -135,7 +135,7 @@ findAttr "cpu_load" = do
     return [("cpu_load", Afloat $ Just load)]
     where
     --pattern = "Cpu\\(s\\): [^\n]+ ([0-9]+.[0-9]*)%id"
-    pattern = "Cpu\\(s\\): [^\n]+ ([0-9]+),([0-9]*) id"
+    pattern = "Cpu\\(s\\): [^\n]+ ([0-9]+)[^0-9]([0-9]*).id"
 findAttr "disk" = do
     output <- liftIO $ myReadProcess "df" ["--total", "-l"] ""
     let s :: [[String]] = output =~ "total [^0-9]+([0-9]+)[^0-9]+[0-9]+[^0-9]+([0-9]+)[^0-9]"
