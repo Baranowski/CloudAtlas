@@ -87,8 +87,11 @@ queries = do
 relevant (n:ns) z = ZoneS (zs_attrs z) newKids
     where
     newKids = if (zN == n)
-        then map (relevant ns) (zs_kids z)
+        then map (relevant ns) (filter (nMatch ns) $ zs_kids z)
         else []
     zN = case (M.lookup "name" (zs_attrs z)) of
         Just (Astr (Just x)) -> x
         _ -> ""
+    nMatch (n2:nss) z = zNameMbe == (Just (Astr (Just n2)))
+        where
+        zNameMbe = M.lookup "name" (zs_attrs z)

@@ -6,6 +6,7 @@ import Control.Monad.Morph
 import Control.Monad.Reader
 import qualified Data.ByteString as B
 import Data.List
+import Data.List.Split
 import qualified Data.Map as M
 import Data.Time.Clock
 import Data.Word
@@ -68,23 +69,37 @@ processMsg (FreshnessInit (t1a,t1b,t2b) fr) client = do
 processMsg (FreshnessResponse (t1a,t1b,t2b) fr) client = do
     t2a <- liftIO $ myCurrentTime
     sendUpdate client fr (t1a,t1b,t2b,t2a)
-processMsg (ZInfo (t1a,t1b,t2b) p l) client = do
+processMsg rZ@(ZInfo (t1a,t1b,t2b) p l) client = do
     myPath <- asks $ (intercalate "/") . c_path . e_conf
     when (p == myPath) $ fail "Refuse to update myself by gossiping"
     t2a <- liftIO $ myCurrentTime
     embedSTM $ do
-        z <- getByPath_stm p
+        zMbe <- lookupPath_stm p
+        verifyFreshness t2a rZ zMbe
+    where
+    verifyFreshness t2a (ZInfo ts p l) (Just z) = do
         (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
         let localTStamp = timeToTimestamp f
+        (adjusted, newAttrs) <- adjAttrsFromList ts t2a l
+        when (adjusted > localTStamp) $ do
+            oldAttrs <- myRead (z_attrs z)
+            myWrite (z_attrs z) newAttrs
+    verifyFreshness t2a (ZInfo ts p l) Nothing = do
+        myPath <- asks $ c_path . e_conf
+        when ((init (splitOn "/" p)) `isPrefixOf` myPath) $ do
+            (_,newAttrs) <- adjAttrsFromList ts t2a l
+            attrsTV <- myNewVar newAttrs
+            let newZ = Zone attrsTV []
+            addZone_stm (splitOn "/" p) newZ
+    adjAttrsFromList (t1a,t1b,t2b) t2a l = do
         f <- case lookup "freshness" l of
                 Just (Atime (Just f)) -> return f
                 Nothing -> fail $ "The zone received does not have the freshness attribute"
         let remoteTStamp = timeToTimestamp f
         let adjusted = frAdjust remoteTStamp (t1a,t1b,t2b,t2a)
-        when (adjusted > localTStamp) $ do
-            oldAttrs <- myRead (z_attrs z)
-            myWrite (z_attrs z) ((M.fromList l) `M.union` oldAttrs)
-
+        return (adjusted, (M.insert "freshness"
+                (Atime $ Just $ timestampToTime adjusted)
+                (M.fromList l) ) )
 processMsg (RmiReq reqId req) client = do
     resp <- rmiPerform req `catchError` (\e -> return $ RmiErr e)
     sendMsg client (RmiResp reqId resp)
@@ -170,26 +185,46 @@ mkFreshness = embedSTM $ do
             return $ (sPath, timeToTimestamp f):(concat res)
 
 sendUpdate client (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
-    fr `forM_` go
+    l1N <- mapM cmpFreshness fr
+    let l1 = concat l1N 
+    l2 <- missing (map fst fr)
+    forM_ (l1++l2) sendInfo
     where
-        go (path, remoteTStamp) = do
-            res <- embedSTM $ do
-                zMbe <- lookupPath_stm path
-                case zMbe of
-                    Just z -> check remoteTStamp times z
-                    Nothing -> return Nothing
-            case res of
-                Just attrs -> do
-                    t3a <- liftIO $ myCurrentTime
-                    sendMsg client (ZInfo (t2b,t2a,t3a) path (M.toList attrs))
-                Nothing -> return ()
-        check rTs times z = do
-            (Atime (Just lf)) <- reqTyped_stm "freshness" (Atime Nothing) z
-            let rt = frAdjust rTs times
-            let lt = timeToTimestamp lf
-            case (lt > rt) of
-                True -> do
-                    attrs <- myRead (z_attrs z)
-                    return $ Just attrs
-                False -> do
-                    return Nothing
+    sendInfo (p, l) = do
+        t3a <- liftIO $ myCurrentTime
+        sendMsg client (ZInfo (t2b,t2a,t3a) p l)
+    cmpFreshness (path, remoteTStamp) = do
+        embedSTM $ do
+            zMbe <- lookupPath_stm path
+            case zMbe of
+                Just z -> check remoteTStamp times z path
+                Nothing -> return []
+    check rTs times z p = do
+        (Atime (Just lf)) <- reqTyped_stm "freshness" (Atime Nothing) z
+        let rt = frAdjust rTs times
+        let lt = timeToTimestamp lf
+        case (lt > rt) of
+            True -> do
+                r <- toSend p z
+                return [r]
+            False -> return []
+    missing ps = embedSTM $ do
+        zTv <- asks e_zones
+        z <- myRead zTv
+        mgo ps [] z
+    mgo ps path z = do
+        n <- reqName_stm z
+        let nPath = path ++ [n]
+        kidsResNest <- mapM (mgo ps nPath) (z_kids z)
+        let kidsRes = concat kidsResNest
+        if ( (all (/=(intercalate "/" nPath)) ps) &&
+             (any ((==path) . init . (splitOn "/")) ps) )
+            then do
+                r <- toSend (intercalate "/" nPath) z
+                return $ r:kidsRes
+            else return kidsRes
+    toSend path z = do
+        attrs <- myRead $ z_attrs z
+        return (path, M.toList $ M.filter
+            (not . (sameType (Aquery Nothing)) )
+            attrs)

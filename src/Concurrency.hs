@@ -23,6 +23,9 @@ myRead = lift . lift . readTVar
 myWrite :: TVar a -> a -> StmStack STM ()
 myWrite tv val= lift $ lift $ writeTVar tv val
 
+myNewVar :: a -> StmStack STM (TVar a)
+myNewVar = lift . lift . newTVar
+
 reqAttr_stm aN z = do
     as <- myRead (z_attrs z)
     let n = M.lookup "name" as
@@ -77,3 +80,18 @@ lookupPath_stm path = do
         case nMbe of
             Just (Astr (Just s)) -> return (n==s)
             _ -> return False
+
+addZone_stm l newZ = do
+    zTv <- asks e_zones
+    z <- myRead zTv
+    newRoot <- go newZ (init l) z
+    myWrite zTv newRoot
+    where
+    go newZ [] z = return $ Zone (z_attrs z) (newZ:(z_kids z))
+    go newZ (n:ns) z = do
+        zN <- reqName_stm z
+        if (zN == n)
+            then do
+                newKids <- mapM (go newZ ns) (z_kids z)
+                return $ Zone (z_attrs z) newKids
+            else return z
