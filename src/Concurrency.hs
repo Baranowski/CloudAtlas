@@ -97,3 +97,4 @@ addZone_stm l newZ = do
                     newKids <- mapM (go newZ ns) (z_kids z)
                     return $ Zone (z_attrs z) newKids
             else return z
+

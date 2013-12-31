@@ -19,6 +19,7 @@ data Config = Config { c_port :: PortNumber
                      , c_g_freq :: Int
                      , c_g_strategy :: GossipStrategy
                      , c_qu_fr :: Int
+                     , c_p_freq :: Int
                      }
 
 data Env = Env { e_zones :: TVar Zone
@@ -41,10 +42,12 @@ readConfig path = do
             "random" -> return Random
             "exp-random" -> return ExpRandom
             _ -> fail $ "Unrecognized gossip strategy: " ++ strt
+        pfreq <- C.get cp "" "purging_frequency"
         return $ Config { c_port = fromIntegral $ read port
                         , c_host = host
                         , c_path = splitOn "/" path
                         , c_g_freq = (read gfreq) * 1000 * 1000
                         , c_g_strategy = strategy
                         , c_qu_fr = (read qufr) * 1000 * 1000
+                        , c_p_freq = (read pfreq) * 1000 * 1000
                         }

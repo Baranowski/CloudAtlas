@@ -58,7 +58,45 @@ main = do
     runErrorT $ runReaderT setContact env
     forkIO $ runReaderT gossiping env
     forkIO $ runReaderT queries env
+    forkIO $ (runErrorT $ runReaderT purger env) >> (return ())
     Listener.listen env
+
+purger = do
+    delay <- asks $ c_p_freq . e_conf
+    liftIO $ threadDelay delay
+    singlePurge `catchError` (liftIO . (hPutStrLn stderr))
+    purger
+    where
+    singlePurge = do
+        zTv <- asks e_zones
+        myself <- asks $ c_path . e_conf
+        now <- liftIO $ getCurrentTime
+        embedSTM $ do
+            z <- myRead zTv
+            newZ <- go now myself [] z
+            myWrite zTv newZ
+    go now myself p z = do
+        n <- reqName_stm z
+        let newP = p ++ [n]
+        purgedKids <- filterM
+                        (upToDate now myself p)
+                        (z_kids z)
+        newKids <- mapM (go now myself newP) purgedKids
+        return $ Zone (z_attrs z) newKids
+    upToDate now myself p z = do
+        n <- reqName_stm z
+        let newP = p ++ [n]
+        case (newP `isPrefixOf` myself) of
+            True -> return True
+            False -> do
+                (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
+                let secs :: Double = fromRational $ toRational $
+                                         now `diffUTCTime` f
+                pDelay <- asks $ (/(1000.0*1000.0))
+                               . fromIntegral
+                               . c_p_freq . e_conf
+                return (pDelay > secs)
+
 
 setContact = embedSTM $ do
     myself <- asks $ c_path . e_conf
