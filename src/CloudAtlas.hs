@@ -46,8 +46,9 @@ main = do
     conf <- case conf of
         Left x -> panic $ "readConfig: " ++ (snd x)
         Right x -> return x
+    t <- getCurrentTime
     h_zones <- atomically $ zoneStoTvar
-               (relevant (c_path conf) Hardcoded.zones)
+               (relevant t (c_path conf) Hardcoded.zones)
     new_zones <- atomically $ newTVar h_zones
     contacts <- atomically $ newTVar []
     let env = Env { e_zones = new_zones
@@ -84,10 +85,13 @@ queries = do
     liftIO $ threadDelay delay
     queries
 
-relevant (n:ns) z = ZoneS (zs_attrs z) newKids
+relevant now (n:ns) z =
+    ZoneS
+        (M.insert "freshness" (Atime $ Just now) (zs_attrs z))
+        newKids
     where
     newKids = if (zN == n)
-        then map (relevant ns) (filter (nMatch ns) $ zs_kids z)
+        then map (relevant now ns) (filter (nMatch ns) $ zs_kids z)
         else []
     zN = case (M.lookup "name" (zs_attrs z)) of
         Just (Astr (Just x)) -> x
