@@ -79,7 +79,7 @@ purger = do
         n <- reqName_stm z
         let newP = p ++ [n]
         purgedKids <- filterM
-                        (upToDate now myself p)
+                        (upToDate now myself newP)
                         (z_kids z)
         newKids <- mapM (go now myself newP) purgedKids
         return $ Zone (z_attrs z) newKids

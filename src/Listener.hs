@@ -83,7 +83,8 @@ processMsg rZ@(ZInfo (t1a,t1b,t2b) p l) client = do
         (adjusted, newAttrs) <- adjAttrsFromList ts t2a l
         when (adjusted > localTStamp) $ do
             oldAttrs <- myRead (z_attrs z)
-            myWrite (z_attrs z) newAttrs
+            let queries = M.filter (sameType (Aquery Nothing)) oldAttrs
+            myWrite (z_attrs z) (newAttrs `M.union` queries)
     verifyFreshness t2a (ZInfo ts p l) Nothing = do
         myPath <- asks $ c_path . e_conf
         when ((init (splitOn "/" p)) `isPrefixOf` myPath) $ do
