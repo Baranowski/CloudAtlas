@@ -87,11 +87,13 @@ addZone_stm l newZ = do
     newRoot <- go newZ (init l) z
     myWrite zTv newRoot
     where
-    go newZ [] z = return $ Zone (z_attrs z) (newZ:(z_kids z))
+    go newZ [] z = fail $ "addZone_stm: empy path"
     go newZ (n:ns) z = do
         zN <- reqName_stm z
         if (zN == n)
-            then do
-                newKids <- mapM (go newZ ns) (z_kids z)
-                return $ Zone (z_attrs z) newKids
+            then case ns of
+                [] -> return $ Zone (z_attrs z) (newZ:(z_kids z))
+                _ -> do
+                    newKids <- mapM (go newZ ns) (z_kids z)
+                    return $ Zone (z_attrs z) newKids
             else return z
