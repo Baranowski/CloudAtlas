@@ -267,7 +267,7 @@ instance Serializable Bool where
     deserialize (0:xs) = return (False, xs)
 
 instance Serializable QAT where
-    serialize q = serialize $ show q
+    serialize q = serialize $ ppshow q
     deserialize xs = do
         (s::String, xs) <- deserialize xs
         q <- case (parseSingle s) of

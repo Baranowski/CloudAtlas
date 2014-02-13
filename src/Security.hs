@@ -1,9 +1,10 @@
-{-# LANGUAGE FlexibleInstances, RecordWildCards #-}
+{-# LANGUAGE FlexibleInstances, RecordWildCards, ScopedTypeVariables #-}
 module Security where
 
 import Data.Word
 import Data.Time.Clock
 import qualified Codec.Crypto.RSA as R
+import Crypto.Random
 import qualified Data.ByteString.Lazy as L
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -26,6 +27,12 @@ verifyMsg z@(ZInfo _ p zi) = do
 
 verifyMsg _ = return ()
 
+generateKeys :: IO (PrivKey,PubKey)
+generateKeys = do
+    g::SystemRandom <- newGenIO
+    let (pub,priv,_) = R.generateKeyPair g 1024
+    return (priv,pub)
+
 signZMI :: PrivKey -> String -> UTCTime -> ZoneAttrs -> Certificate
 signZMI pk issuer t attrs = Certificate{..}
     where
@@ -36,6 +43,16 @@ signZMI pk issuer t attrs = Certificate{..}
     serialized = (serialize attrs)
               ++ (serialize ct_id)
               ++ (serialize ct_create)
+
+signZone :: String -> UTCTime -> PrivKey -> Int -> String -> PubKey -> ZoneCert
+signZone issuer t pk zc_level zc_name zc_pubkey = ZoneCert{..}
+    where
+    zc_cert = Certificate{..}
+    ct_id = issuer ++ "_" ++ (show ct_create)
+    ct_create = timeToTimestamp t
+    ct_sig = L.unpack $ R.sign pk (L.pack serialized)
+    serialized = serialize (ct_id, ct_create)
+              ++ serialize (zc_level, zc_name, zc_pubkey)
 
 class Hashable a where
     mkserial :: a -> [Word8]
