@@ -3,7 +3,6 @@ module Zones where
 
 import Text.ParserCombinators.Parsec
 import qualified Data.Map as M
-import QAT
 import Data.Time.Clock
 import Data.Time.Format
 import Data.Time.Clock.POSIX
@@ -14,31 +13,45 @@ import Text.Printf
 import Text.Parsec.String
 import Control.Concurrent.STM
 
-type ZoneInfo = M.Map String Attribute
+import QAT
+import SecData
+
+type ZoneAttrs = M.Map String Attribute
+data ZoneInfo = ZoneInfo { zi_attrs :: ZoneAttrs
+                         , zi_cert  :: Certificate
+                         , zi_zc    :: ZoneCert
+                         }
+                         deriving (Show,Read)
+
 data Zone = Zone
-    { z_attrs :: TVar ZoneInfo
+    { z_info :: TVar ZoneInfo
+    , z_kca  :: Maybe PubKey
+    , z_kpriv:: Maybe PrivKey
     , z_kids :: [Zone]
     }
     deriving (Eq)
+
 data ZoneS = ZoneS
-    { zs_attrs :: ZoneInfo
+    { zs_attrs :: ZoneAttrs
     , zs_kids :: [ZoneS]
     }
     deriving (Show, Eq)
 
+{-
 zoneStoTvar z = go z
     where
     go z = do
         newKids <- mapM zoneStoTvar (zs_kids z)
         newAttrs <- newTVar (zs_attrs z)
         return Zone{z_attrs=newAttrs, z_kids=newKids}
+        -}
 
 zoneTvarToS z = go z
     where
     go z = do
         newKids <- mapM go (z_kids z)
-        newAttrs <- readTVar (z_attrs z)
-        return ZoneS{zs_attrs=newAttrs, zs_kids=newKids}
+        newInfo <- readTVar (z_info z)
+        return ZoneS{zs_attrs=zi_attrs newInfo, zs_kids=newKids}
 
 type Contact = (String, String)
 
@@ -53,7 +66,7 @@ data Attribute
     | Acontact (Maybe Contact)
     | Aduration (Maybe Integer)
     | Afloat (Maybe Double)
-    deriving (Show, Eq)
+    deriving (Show, Eq, Read)
 isNonNullQuery (Aquery (Just x)) = True
 isNonNullQuery _ = False
 isNull (Aint Nothing) = True

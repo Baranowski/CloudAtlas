@@ -7,8 +7,13 @@ import QAT
 
 type MyParser st res = GenParser Char st res
 
+wordFirstChar :: [Char]
 wordFirstChar =  ['a'..'z'] ++ ['A'..'Z'] ++ "_"
+
+wordChars :: [Char]
 wordChars = ['a'..'z'] ++ ['A'..'Z'] ++ "_" ++ ['0'..'9']
+
+reservedKeywords :: [String]
 reservedKeywords =
     [ "SELECT"
     , "AS"

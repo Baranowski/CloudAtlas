@@ -3,52 +3,58 @@ module QAT where
 
 import Data.List
 
+class PPShow a where
+    ppshow :: a -> String
+
 data QAT =
     QAT [Qsel] (Maybe Qexpr) [Qorder]
-    deriving (Eq)
-instance Show QAT where
-    show (QAT sels mbWhere orders) =
-        "SELECT " ++ (concat $ intersperse ", " (map show sels)) ++
+    deriving (Eq,Show,Read)
+instance PPShow QAT where
+    ppshow (QAT sels mbWhere orders) =
+        "SELECT " ++ (concat $ intersperse ", " (map ppshow sels)) ++
             " " ++ (whereClause mbWhere) ++
             " " ++ (orderClause orders)
 
+whereClause :: Maybe Qexpr -> String
 whereClause Nothing = ""
-whereClause (Just e) = "WHERE " ++ (show e)
+whereClause (Just e) = "WHERE " ++ (ppshow e)
+
+orderClause :: [Qorder] -> String
 orderClause [] = ""
-orderClause xs = "ORDER BY " ++ (concat $ intersperse ", " (map show xs))
+orderClause xs = "ORDER BY " ++ (concat $ intersperse ", " (map ppshow xs))
 
 data Qnested =
     Qnested Qexpr (Maybe Qexpr) [Qorder]
-    deriving (Eq)
-instance Show Qnested where
-    show (Qnested e mbWhere orders) =
-        "SELECT " ++ (show e) ++
+    deriving (Eq,Show,Read)
+instance PPShow Qnested where
+    ppshow (Qnested e mbWhere orders) =
+        "SELECT " ++ (ppshow e) ++
             " " ++ (whereClause mbWhere) ++
             " " ++ (orderClause orders)
 
 data Qsel =
     Qsel Qexpr String
-    deriving (Eq)
-instance Show Qsel where
-    show (Qsel e s) = "(" ++ (show e) ++ ") AS " ++ s
+    deriving (Eq,Show,Read)
+instance PPShow Qsel where
+    ppshow (Qsel e s) = "(" ++ (ppshow e) ++ ") AS " ++ s
 
 data Qorder =
     Qorder Qexpr Order NullOrder
-    deriving (Eq)
-instance Show Qorder where
-    show (Qorder e ord nord) = (show e) ++ " " ++ (show ord) ++ " " ++ (show nord)
+    deriving (Eq,Show,Read)
+instance PPShow Qorder where
+    ppshow (Qorder e ord nord) = (ppshow e) ++ " " ++ (ppshow ord) ++ " " ++ (ppshow nord)
 
 data Order = Oasc | Odesc
-    deriving (Eq)
-instance Show Order where
-    show Oasc = "ASC"
-    show Odesc = "DESC"
+    deriving (Eq,Show,Read)
+instance PPShow Order where
+    ppshow Oasc = "ASC"
+    ppshow Odesc = "DESC"
 
 data NullOrder = Onfirst | Onlast
-    deriving (Eq)
-instance Show NullOrder where
-    show Onfirst = "NULLS FIRST"
-    show Onlast = "NULLS LAST"
+    deriving (Eq,Show,Read)
+instance PPShow NullOrder where
+    ppshow Onfirst = "NULLS FIRST"
+    ppshow Onlast = "NULLS LAST"
 
 data Qexpr = Eor [Qexpr]
            | Eand [Qexpr]
@@ -66,39 +72,42 @@ data Qexpr = Eor [Qexpr]
            | Eint Int
            | Evar String
            | Eapp String [Qexpr]
-    deriving (Eq)
-instance Show Qexpr where
-    show (Eor es) = "(" ++ (concat $ intersperse " OR " (map show es)) ++ ")"
-    show (Eand es) = "(" ++ (concat $ intersperse " AND " (map show es)) ++ ")"
-    show (Enot e) = "NOT " ++ show e
-    show (Erel r e1 e2) = (show e1) ++ " " ++ (show r) ++ " " ++ (show e2)
-    show (Erexp e s) = (show e) ++ " REGEXP \"" ++ s ++ "\""
-    show (Eadd e l) = "(" ++ (show e) ++ (concatMap mulShow l) ++ ")"
-    show (Emul e l) = "(" ++ (show e) ++ (concatMap addShow l) ++ ")"
-    show (Eneg e) = "-" ++ (show e)
-    show Etrue = "TRUE"
-    show Efalse = "FALSE"
-    show (Equery q)= "(" ++ (show q) ++ ")"
-    show (Estr s) = "\"" ++ s ++ "\""
-    show (Efloat d) = show d
-    show (Eint i) = show i
-    show (Evar s) = s
-    show (Eapp s es) = s ++ "(" ++ (concat $ intersperse ", " (map show es)) ++ ")"
+    deriving (Eq,Show,Read)
+instance PPShow Qexpr where
+    ppshow (Eor es) = "(" ++ (concat $ intersperse " OR " (map ppshow es)) ++ ")"
+    ppshow (Eand es) = "(" ++ (concat $ intersperse " AND " (map ppshow es)) ++ ")"
+    ppshow (Enot e) = "NOT " ++ ppshow e
+    ppshow (Erel r e1 e2) = (ppshow e1) ++ " " ++ (ppshow r) ++ " " ++ (ppshow e2)
+    ppshow (Erexp e s) = (ppshow e) ++ " REGEXP \"" ++ s ++ "\""
+    ppshow (Eadd e l) = "(" ++ (ppshow e) ++ (concatMap addShow l) ++ ")"
+    ppshow (Emul e l) = "(" ++ (ppshow e) ++ (concatMap mulShow l) ++ ")"
+    ppshow (Eneg e) = "-" ++ (ppshow e)
+    ppshow Etrue = "TRUE"
+    ppshow Efalse = "FALSE"
+    ppshow (Equery q)= "(" ++ (ppshow q) ++ ")"
+    ppshow (Estr s) = "\"" ++ s ++ "\""
+    ppshow (Efloat d) = show d
+    ppshow (Eint i) = show i
+    ppshow (Evar s) = s
+    ppshow (Eapp s es) = s ++ "(" ++ (concat $ intersperse ", " (map ppshow es)) ++ ")"
 
-mulShow (m, e) = " " ++ (show m) ++ " " ++ (show e)
-addShow (m, e) = " " ++ (show m) ++ " " ++ (show e)
+mulShow :: (MulOper, Qexpr) -> String
+mulShow (m, e) = " " ++ (ppshow m) ++ " " ++ (ppshow e)
+
+addShow :: (AddOper, Qexpr) -> String
+addShow (m, e) = " " ++ (ppshow m) ++ " " ++ (ppshow e)
 
 data MulOper = OpMul | OpDiv | OpMod
-    deriving (Eq)
-instance Show MulOper where
-    show OpMul = "*"
-    show OpDiv = "/"
-    show OpMod = "%"
+    deriving (Eq,Show,Read)
+instance PPShow MulOper where
+    ppshow OpMul = "*"
+    ppshow OpDiv = "/"
+    ppshow OpMod = "%"
 data AddOper = OpAdd | OpSub
-    deriving (Eq)
-instance Show AddOper where
-    show OpAdd = "+"
-    show OpSub = "-"
+    deriving (Eq,Show,Read)
+instance PPShow AddOper where
+    ppshow OpAdd = "+"
+    ppshow OpSub = "-"
 
 data CmpRel = Rle
             | Rlt
@@ -106,11 +115,11 @@ data CmpRel = Rle
             | Rgt
             | Req
             | Rne
-    deriving (Eq)
-instance Show CmpRel where
-    show Rle = "<="
-    show Rlt = "<"
-    show Rge = ">="
-    show Rgt = ">"
-    show Req = "="
-    show Rne = "!="
+    deriving (Eq,Show,Read)
+instance PPShow CmpRel where
+    ppshow Rle = "<="
+    ppshow Rlt = "<"
+    ppshow Rge = ">="
+    ppshow Rgt = ">"
+    ppshow Req = "="
+    ppshow Rne = "!="

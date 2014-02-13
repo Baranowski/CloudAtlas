@@ -5,6 +5,7 @@ import Control.Concurrent.STM
 import Control.Monad.Morph
 import Control.Monad.Reader
 import Control.Monad.Error
+import Control.Applicative
 import Data.List
 import Data.List.Split
 import qualified Data.Map as M
@@ -27,7 +28,7 @@ myNewVar :: a -> StmStack STM (TVar a)
 myNewVar = lift . lift . newTVar
 
 reqAttr_stm aN z = do
-    as <- myRead (z_attrs z)
+    as <- zi_attrs <$> myRead (z_info z)
     let n = M.lookup "name" as
     case M.lookup aN as of
         Nothing -> fail $ "Required attribute " ++ aN ++ " does not exist" ++ " " ++ (show n)
@@ -75,7 +76,7 @@ lookupPath_stm path = do
             1 -> go ns (head kid)
             _ -> fail $ "Siblings sharing the same name"
       byName n z = do
-        attrs <- lift $ lift $ readTVar (z_attrs z)
+        attrs <- lift $ lift $ zi_attrs <$> readTVar (z_info z)
         let nMbe = M.lookup "name" attrs
         case nMbe of
             Just (Astr (Just s)) -> return (n==s)
@@ -91,10 +92,10 @@ addZone_stm l newZ = do
     go newZ (n:ns) z = do
         zN <- reqName_stm z
         if (zN == n)
-            then case ns of
-                [] -> return $ Zone (z_attrs z) (newZ:(z_kids z))
-                _ -> do
-                    newKids <- mapM (go newZ ns) (z_kids z)
-                    return $ Zone (z_attrs z) newKids
+            then do
+                newKids <- case ns of
+                    [] -> return $ (newZ:(z_kids z))
+                    _ -> mapM (go newZ ns) (z_kids z)
+                return $ z{z_kids=newKids}
             else return z
 

@@ -6,6 +6,7 @@ import Control.Monad.Error
 import Control.Monad.Morph
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Applicative
 import Data.Bits
 import Data.List
 import Data.Time.Clock
@@ -82,7 +83,7 @@ lookupContacts myName shortPath = do
     strip _ =  []
 
 hasContacts_stm z = do
-    attrs <- myRead (z_attrs z)
+    attrs <- zi_attrs <$> (myRead (z_info z))
     let cMbe = M.lookup "contacts" attrs
     n <- reqName_stm z
     case cMbe of

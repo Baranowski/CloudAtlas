@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, RecordWildCards #-}
 module Main where
 
 import System.IO
@@ -16,6 +16,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Identity
 import Control.Monad.Morph
+import Control.Applicative
 
 import Concurrency
 import qualified Hardcoded
@@ -24,6 +25,8 @@ import Interpreter
 import Gossip
 import ServerConfig
 import Listener
+import Security
+import Utils
 
 panic msg = do
     hPutStrLn stderr msg
@@ -43,13 +46,13 @@ main = do
         [confPath] -> return confPath
         _ -> unknown
     conf <- readConfig confPath
-    conf <- case conf of
+    (conf,keys) <- case conf of
         Left x -> panic $ "readConfig: " ++ (snd x)
         Right x -> return x
     t <- getCurrentTime
-    h_zones <- atomically $ zoneStoTvar
-               (relevant t (c_path conf) Hardcoded.zones)
-    new_zones <- atomically $ newTVar h_zones
+    let myname = intercalate "/" (c_path conf)
+    zones <- initZones myname t ((reverse $ c_path conf) `zip` keys)
+    new_zones <- atomically $ newTVar zones
     contacts <- atomically $ newTVar []
     let env = Env { e_zones = new_zones
                   , e_contacts = contacts
@@ -60,6 +63,28 @@ main = do
     forkIO $ runReaderT queries env
     forkIO $ (runErrorT $ runReaderT purger env) >> (return ())
     Listener.listen env
+
+initZones myname t l = go l []
+    where
+    go ((n,(caK,prvK,zc)):xs) kids = do
+        z_info <- atomically $ newTVar info
+        let z = Zone{..}
+        if null xs
+            then return z
+            else go xs [z]
+        where
+        z_kids = kids
+        z_kca = caK
+        z_kpriv = Just prvK
+        info = ZoneInfo{..}
+        zi_zc = zc
+        zi_attrs = M.fromList
+            [ ("name", if null xs
+                            then Astr Nothing
+                            else Astr $ Just n)
+            , ("timestamp", Atime $ Just t)
+            ]
+        zi_cert = signZMI prvK myname t zi_attrs
 
 purger = do
     delay <- asks $ c_p_freq . e_conf
@@ -82,7 +107,7 @@ purger = do
                         (upToDate now myself newP)
                         (z_kids z)
         newKids <- mapM (go now myself newP) purgedKids
-        return $ Zone (z_attrs z) newKids
+        return $ z{z_kids=newKids}
     upToDate now myself p z = do
         n <- reqName_stm z
         let newP = p ++ [n]
@@ -97,31 +122,60 @@ purger = do
                                . c_p_freq . e_conf
                 return (pDelay > secs)
 
-
 setContact = embedSTM $ do
     myself <- asks $ c_path . e_conf
     portS <- asks $ show . c_port . e_conf
     hostS <- asks $ c_host . e_conf
     let c = (hostS, portS)
     z <- getByPath_stm (intercalate "/" myself)
-    attrs <- myRead (z_attrs z)
-    myWrite (z_attrs z) (M.insert "contacts" (Aset 0 (Just [Acontact $ Just c])) attrs)
+    info <- myRead (z_info z)
+    myWrite (z_info z) info{zi_attrs=M.insert "contacts" (Aset 0 (Just [Acontact $ Just c])) (zi_attrs info)}
 
 queries = do
     zTv <- asks e_zones
+    myname <- asks $ (intercalate "/") . c_path . e_conf
     g <- liftIO $ newStdGen
     now <- liftIO $ getCurrentTime
     errs <- hoist atomically $ do
         z <- lift $ readTVar zTv
         zS <- lift $ zoneTvarToS z
         let ((newZS, errs),_) = runIdentity $ runStateT (runWriterT $ performQueries zS) (g,now)
-        newZ <- lift $ zoneStoTvar newZS
+        newZ <- lift $ updateZones myname now z newZS
         lift $ writeTVar zTv newZ
         return errs
     liftIO $ mapM (hPutStrLn stderr) errs
     delay <- asks $ c_qu_fr . e_conf
     liftIO $ threadDelay delay
     queries
+
+updateZones :: String -> UTCTime -> Zone -> ZoneS -> STM Zone
+updateZones issuer t oldZ zs = 
+    case z_kpriv oldZ of
+        Nothing -> return oldZ
+        Just pk -> do
+            newKids <- concatMapM (findMatchAndUpdate
+                                        (zs_kids zs))
+                                  (z_kids oldZ)
+            oldInfo <- readTVar (z_info oldZ)
+            let newInfo = oldInfo{ zi_attrs = newAttrs
+                                 , zi_cert  = newCert pk
+                                 }
+            newInfoTV <- newTVar newInfo
+            return oldZ{ z_kids = newKids
+                       , z_info = newInfoTV
+                       }
+    where
+    newAttrs = zs_attrs zs
+    newCert pk = signZMI pk issuer t newAttrs
+    findMatchAndUpdate :: [ZoneS] -> Zone -> STM [Zone]
+    findMatchAndUpdate zss z = do
+        attrs <- zi_attrs <$> (readTVar $ z_info z)
+        let onlyzs = filter (matchName (M.lookup "name" attrs)) zss
+        case onlyzs of
+            [x] -> (:[]) <$> (updateZones issuer t z x)
+            _ -> return []
+    matchName :: Maybe Attribute -> ZoneS -> Bool
+    matchName attrMb zs = (M.lookup "name" (zs_attrs zs))==attrMb
 
 relevant now (n:ns) z =
     ZoneS

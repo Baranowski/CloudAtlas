@@ -10,10 +10,12 @@ import Network.Socket
 import Control.Monad.Error
 import Data.Functor.Identity
 import Data.Either
+import qualified Data.Map as M
 
 import Zones
 import QAT
 import Parser
+import SecData
 
 type CommMonad res = (ErrorT String Identity) res
 generalizeId m = return (runIdentity m)
@@ -59,6 +61,12 @@ instance Serializable a => Serializable (Maybe a) where
         return (Just res, xs)
     deserialize _ = fail "Unrecognized Maybe serialization"
 
+instance (Serializable a, Serializable b, Ord a) => Serializable (M.Map a b) where
+    serialize = serialize . M.toAscList
+    deserialize xs = do
+        (l, xs) <- deserialize xs
+        return (M.fromList l, xs)
+
 newtype Header = Header {hd_port :: PortNumber}
 
 updateClient (SockAddrInet p host) hd =
@@ -79,7 +87,7 @@ data Msg
     | FreshnessInit TimeInfo Freshness
     | FreshnessResponse TimeInfo Freshness
     | RmiReq Int RemoteCall
-    | ZInfo TimeInfo String [(String, Attribute)]
+    | ZInfo TimeInfo String ZoneInfo
     | RmiResp Int RemoteReturn
     deriving (Show)
 
@@ -222,6 +230,10 @@ instance Serializable Double where
         (i2::Int, xs) <- deserialize xs
         return (encodeFloat i1 i2, xs)
 
+instance Serializable Word8 where
+    serialize x = [x]
+    deserialize (x:xs) = return (x, xs)
+
 instance Serializable UTCTime where
     serialize t = (serialize $ timeToTimestamp t)
     deserialize xs = do
@@ -262,6 +274,36 @@ instance Serializable QAT where
             Left err -> fail $ show err
             Right x -> return x
         return (q, xs)
+
+instance Serializable ZoneInfo where
+    serialize (ZoneInfo za cert zc) = serialize (za, cert, zc)
+    deserialize xs = do
+        ((za, cert, zc), xs) <- deserialize xs
+        return (ZoneInfo za cert zc, xs)
+
+instance Serializable Certificate where
+    serialize (Certificate id cr sig) = serialize (id, cr, sig)
+    deserialize xs = do
+        ((id, cr, sig), xs) <- deserialize xs
+        return (Certificate id cr sig, xs)
+
+instance Serializable ZoneCert where
+    serialize (ZoneCert lev nm pk cert) = serialize (lev, nm, pk, cert)
+    deserialize xs = do
+        ((lev, nm, pk, cert), xs) <- deserialize xs
+        return (ZoneCert lev nm pk cert, xs)
+
+instance Serializable PubKey where
+    serialize = serialize . show
+    deserialize xs = do
+        (s, xs) <- deserialize xs
+        return (read s, xs)
+
+instance Serializable PrivKey where
+    serialize = serialize . show
+    deserialize xs = do
+        (s, xs) <- deserialize xs
+        return (read s, xs)
 
 data RemoteCall
     = SetContacts [Contact]

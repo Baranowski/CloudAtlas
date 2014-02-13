@@ -4,6 +4,7 @@ import Control.Concurrent
 import Control.Monad.Error
 import Control.Monad.Morph
 import Control.Monad.Reader
+import Control.Applicative
 import qualified Data.ByteString as B
 import Data.List
 import Data.List.Split
@@ -21,6 +22,7 @@ import Network
 import Utils
 import Zones
 import Parser
+import Security
 
 listen env = do
     sock <- socket AF_INET Datagram 0
@@ -47,6 +49,7 @@ handleMsg ::  [Word8] -> SockAddr -> ReaderT Env (ErrorT String IO) ()
 handleMsg mesg sender = do
     (msg, client) <- lift $ hoist generalizeId $ go mesg sender
     when debug (liftIO $ hPutStrLn stderr $ "Received msg: \n  " ++ (show msg) ++ "\n  from: " ++ (show client))
+    verifyMsg msg
     processMsg msg client
     where
       go mesg sender = do
@@ -69,38 +72,39 @@ processMsg (FreshnessInit (t1a,t1b,t2b) fr) client = do
 processMsg (FreshnessResponse (t1a,t1b,t2b) fr) client = do
     t2a <- liftIO $ myCurrentTime
     sendUpdate client fr (t1a,t1b,t2b,t2a)
-processMsg rZ@(ZInfo (t1a,t1b,t2b) p l) client = do
+processMsg rZ@(ZInfo (t1a,t1b,t2b) p zi) client = do
     myPath <- asks $ (intercalate "/") . c_path . e_conf
-    when (p == myPath) $ fail "Refuse to update myself by gossiping"
+    when (p `isPrefixOf` myPath) $ fail "Refuse to update myself by gossiping"
     t2a <- liftIO $ myCurrentTime
     embedSTM $ do
         zMbe <- lookupPath_stm p
         verifyFreshness t2a rZ zMbe
     where
-    verifyFreshness t2a (ZInfo ts p l) (Just z) = do
+    verifyFreshness t2a (ZInfo ts p zi) (Just z) = do
         (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
         let localTStamp = timeToTimestamp f
-        (adjusted, newAttrs) <- adjAttrsFromList ts t2a l
+        (adjusted, newAttrs) <- adjAttrsFromList ts t2a (zi_attrs zi)
         when (adjusted > localTStamp) $ do
-            oldAttrs <- myRead (z_attrs z)
+            oldInfo <- myRead (z_info z)
+            let oldAttrs = zi_attrs oldInfo
             let queries = M.filter (sameType (Aquery Nothing)) oldAttrs
-            myWrite (z_attrs z) (newAttrs `M.union` queries)
-    verifyFreshness t2a (ZInfo ts p l) Nothing = do
+            myWrite (z_info z) oldInfo{zi_attrs=(newAttrs `M.union` queries)}
+    verifyFreshness t2a (ZInfo ts p zi) Nothing = do
         myPath <- asks $ c_path . e_conf
         when ((init (splitOn "/" p)) `isPrefixOf` myPath) $ do
-            (_,newAttrs) <- adjAttrsFromList ts t2a l
-            attrsTV <- myNewVar newAttrs
-            let newZ = Zone attrsTV []
+            (_,newAttrs) <- adjAttrsFromList ts t2a (zi_attrs zi)
+            attrsTV <- myNewVar zi{zi_attrs=newAttrs}
+            let newZ = Zone attrsTV Nothing Nothing []
             addZone_stm (splitOn "/" p) newZ
-    adjAttrsFromList (t1a,t1b,t2b) t2a l = do
-        f <- case lookup "freshness" l of
+    adjAttrsFromList (t1a,t1b,t2b) t2a m = do
+        f <- case M.lookup "freshness" m of
                 Just (Atime (Just f)) -> return f
                 Nothing -> fail $ "The zone received does not have the freshness attribute"
         let remoteTStamp = timeToTimestamp f
         let adjusted = frAdjust remoteTStamp (t1a,t1b,t2b,t2a)
         return (adjusted, (M.insert "freshness"
-                (Atime $ Just $ timestampToTime adjusted)
-                (M.fromList l) ) )
+                            (Atime $ Just $ timestampToTime adjusted)
+                            m ) )
 processMsg (RmiReq reqId req) client = do
     resp <- rmiPerform req `catchError` (\e -> return $ RmiErr e)
     sendMsg client (RmiResp reqId resp)
@@ -113,7 +117,7 @@ rmiPerform GetBagOfZones = do
     return $ RmiBagOfZones res
     where
       go prevN z = do
-        attrs <- myRead (z_attrs z)
+        attrs <- zi_attrs <$> myRead (z_info z)
         let nMbe = M.lookup "name" attrs
         myName <- case nMbe of
                     Just (Astr (Just s)) -> return $ prevN ++ s ++ "/"
@@ -124,7 +128,7 @@ rmiPerform GetBagOfZones = do
 rmiPerform (GetZoneAttrs path) = do
     res <- embedSTM $ do
         z <- getByPath_stm path
-        attrs <- myRead $ z_attrs z
+        attrs <- zi_attrs <$> (myRead $ z_info z)
         return $ M.toList attrs
     return $ RmiZoneInfo res
 rmiPerform (SetZoneAttrs attrs) = do
@@ -132,10 +136,11 @@ rmiPerform (SetZoneAttrs attrs) = do
     embedSTM $ do
         path <- asks $ c_path . e_conf
         z <- getByPath_stm (intercalate "/" path)
-        oldAttrs <- myRead (z_attrs z)
+        oldInfo <- myRead (z_info z)
+        let oldAttrs = zi_attrs oldInfo
         let newAttrs = (M.fromList attrs) `M.union` oldAttrs
         let freshAttrs = M.insert "freshness" (Atime $ Just t) newAttrs
-        myWrite (z_attrs z) freshAttrs
+        myWrite (z_info z) oldInfo{zi_attrs=freshAttrs}
     return RmiOk
 rmiPerform (SetContacts cSs) = do
     csTvar <- asks e_contacts
@@ -152,8 +157,8 @@ rmiPerform (InstallQuery path name query) = do
         return RmiOk
     go name q z = do
         when (null $ z_kids z) $ fail "Cannot install query in a lowest-level zone"
-        attrs <- myRead (z_attrs z)
-        myWrite (z_attrs z) (M.insert name (Aquery $ Just q) attrs)
+        info <- myRead (z_info z)
+        myWrite (z_info z) info{zi_attrs=M.insert name (Aquery $ Just q) (zi_attrs info)}
 rmiPerform (UninstallQuery path name) = embedSTM $ do
     zs <- matchingZones_stm path
     forM_ zs (go name)
@@ -161,8 +166,8 @@ rmiPerform (UninstallQuery path name) = embedSTM $ do
     where
     go name z = do
         reqTyped_stm name (Aquery Nothing) z
-        attrs <- myRead (z_attrs z)
-        myWrite (z_attrs z) (M.delete name attrs)
+        info <- myRead (z_info z)
+        myWrite (z_info z) info{zi_attrs=M.delete name (zi_attrs info)}
 
 frAdjust tstamp times@(t1a,t1b,t2b,t2a) = 
   -- localTStamp: tstamp-(t2b-(t2a-delay))
@@ -225,7 +230,5 @@ sendUpdate client (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
                 return $ r:kidsRes
             else return kidsRes
     toSend path z = do
-        attrs <- myRead $ z_attrs z
-        return (path, M.toList $ M.filter
-            (not . (sameType (Aquery Nothing)) )
-            attrs)
+        info <- myRead $ z_info z
+        return (path, info{zi_attrs=M.filter (not . (sameType (Aquery Nothing)) ) (zi_attrs info)})
