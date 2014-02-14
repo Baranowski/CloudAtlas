@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module ServerConfig where
 
 import Control.Concurrent.STM
@@ -9,8 +10,7 @@ import Data.List.Split
 import Network.Socket hiding (recvFrom, sendTo)
 
 import Zones
-
-debug = True
+import SecData
 
 data GossipStrategy = RoundRobin | ExpRR | Random | ExpRandom
 
@@ -57,18 +57,23 @@ readGlobalConfig cp = do
                         , c_p_freq = (read pfreq) * 1000 * 1000
                         }
 
+readSecurityConfig :: (MonadError CPError m) => [String] -> C.ConfigParser -> m [(Maybe PubKey, Maybe PrivKey, Maybe ZoneCert)]
 readSecurityConfig path cp = go cp 0 ((length path)-1) []
     where
     go cp lvl maxL acc = do
-        let section = "level_ " ++ (show lvl)
+        let section = "level_" ++ (show lvl)
         caPubKey <- if lvl < maxL
-            then do pk <- C.get cp section "CA_public_key"
+            then do pk <- C.get cp section "ca_public_key"
                     return $ Just (read pk)
             else return Nothing
-        privKeyStr <- C.get cp section "private_key"
-        let privKey = read privKeyStr
-        zoneCertStr <- C.get cp section "zone_certificate"
-        let zoneCert = read zoneCertStr
+        (privKey, zoneCert) <- if lvl > 0
+            then do
+                privKeyStr <- C.get cp section "private_key"
+                let privKey = read privKeyStr
+                zoneCertStr <- C.get cp section "zone_certificate"
+                let zoneCert = read zoneCertStr
+                return (Just privKey, Just zoneCert)
+            else return (Nothing, Nothing)
         let newAcc = (caPubKey,privKey,zoneCert):acc
         if lvl < maxL
             then go cp (lvl+1) maxL newAcc

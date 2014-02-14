@@ -18,8 +18,8 @@ import SecData
 
 type ZoneAttrs = M.Map String Attribute
 data ZoneInfo = ZoneInfo { zi_attrs :: ZoneAttrs
-                         , zi_cert  :: Certificate
-                         , zi_zc    :: ZoneCert
+                         , zi_cert  :: Maybe Certificate
+                         , zi_zc    :: Maybe ZoneCert
                          }
                          deriving (Show,Read)
 
@@ -170,7 +170,7 @@ instance MyShow Bool where
 instance MyShow Double where
     myshow x = show x
 instance MyShow QAT where
-    myshow x = show x
+    myshow x = ppshow x
 instance MyShow Contact where
     myshow (h,p) = h ++ ":" ++ p
 

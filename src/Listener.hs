@@ -32,8 +32,8 @@ listen env = do
 server env sock = do
     (mesg, client) <- recvFrom sock maxLine
     newThread env $ do
-        when debug (liftIO $ putStrLn "New message received")
         handleMsg (B.unpack mesg) client
+            `myTrace` "New message received"
     server env sock
 
 newThread env monad =
@@ -48,9 +48,12 @@ maxLine = 20000
 handleMsg ::  [Word8] -> SockAddr -> ReaderT Env (ErrorT String IO) ()
 handleMsg mesg sender = do
     (msg, client) <- lift $ hoist generalizeId $ go mesg sender
-    when debug (liftIO $ hPutStrLn stderr $ "Received msg: \n  " ++ (show msg) ++ "\n  from: " ++ (show client))
-    verifyMsg msg
-    processMsg msg client
+    (do verifyMsg msg
+            `myTrace`
+            ("Received msg: \n  " ++ (show msg) ++ "\n  from: " ++ (show client))
+        processMsg msg client)
+        `addTrace`
+        ("handleMsg msg=" ++ (show msg) ++ " client=" ++ (show client))
     where
       go mesg sender = do
         (hd, newMsg) <- readHeader mesg
@@ -79,6 +82,8 @@ processMsg rZ@(ZInfo (t1a,t1b,t2b) p zi) client = do
     embedSTM $ do
         zMbe <- lookupPath_stm p
         verifyFreshness t2a rZ zMbe
+  `addTrace`
+  ("ZInfo for " ++ p)
     where
     verifyFreshness t2a (ZInfo ts p zi) (Just z) = do
         (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
@@ -102,9 +107,7 @@ processMsg rZ@(ZInfo (t1a,t1b,t2b) p zi) client = do
                 Nothing -> fail $ "The zone received does not have the freshness attribute"
         let remoteTStamp = timeToTimestamp f
         let adjusted = frAdjust remoteTStamp (t1a,t1b,t2b,t2a)
-        return (adjusted, (M.insert "freshness"
-                            (Atime $ Just $ timestampToTime adjusted)
-                            m ) )
+        return (adjusted, m)
 processMsg (RmiReq reqId req) client = do
     resp <- rmiPerform req `catchError` (\e -> return $ RmiErr e)
     sendMsg client (RmiResp reqId resp)
@@ -135,12 +138,23 @@ rmiPerform (SetZoneAttrs attrs) = do
     t <- liftIO $ getCurrentTime
     embedSTM $ do
         path <- asks $ c_path . e_conf
-        z <- getByPath_stm (intercalate "/" path)
+        let myPath = intercalate "/" path
+        z <- getByPath_stm myPath
+        pk <- case z_kpriv z of
+                Just x -> return x
+                Nothing -> fail "Don't have private key"
         oldInfo <- myRead (z_info z)
         let oldAttrs = zi_attrs oldInfo
         let newAttrs = (M.fromList attrs) `M.union` oldAttrs
         let freshAttrs = M.insert "freshness" (Atime $ Just t) newAttrs
-        myWrite (z_info z) oldInfo{zi_attrs=freshAttrs}
+        myWrite (z_info z) oldInfo{zi_attrs=freshAttrs
+                                  ,zi_cert =Just $ signZMI
+                                                pk
+                                                myPath
+                                                t
+                                                freshAttrs
+                                                myPath
+                                  }
     return RmiOk
 rmiPerform (SetContacts cSs) = do
     csTvar <- asks e_contacts

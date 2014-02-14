@@ -6,6 +6,7 @@ import Control.Monad.Error
 import Data.List
 import Data.List.Split
 import Control.Monad
+import Debug.HTrace(htrace)
 
 import Zones
 
@@ -21,3 +22,14 @@ parentOf p = intercalate "/" $ init $ splitOn "/" p
 concatMapM f l = do
     newL <- mapM f l
     return $ concat newL
+
+debug :: Bool
+debug = True
+
+myTrace x s =
+    if debug
+        then htrace s x
+        else x
+
+
+

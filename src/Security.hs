@@ -22,8 +22,17 @@ verifyMsg z@(ZInfo _ p zi) = do
     pk <- case z_kca z of
         Just pk -> return pk
         _ -> fail "CA public key unknown"
-    verify pk $ zi_zc zi
-    verify (zc_pubkey $ zi_zc zi) (p, zi)
+    zc <- case zi_zc zi of
+        Just x -> return x
+        _ -> fail "Received ZMI without Zone Certificate"
+    (verify pk zc)
+        `addTrace`
+        "Verifying ZoneCert"
+    (verify (zc_pubkey $ zc) (p, zi))
+        `addTrace`
+        "Verifying ZMI Certificate"
+  `addTrace`
+  ("Verifying ZInfo for " ++ p)
 
 verifyMsg _ = return ()
 
@@ -33,16 +42,20 @@ generateKeys = do
     let (pub,priv,_) = R.generateKeyPair g 1024
     return (priv,pub)
 
-signZMI :: PrivKey -> String -> UTCTime -> ZoneAttrs -> Certificate
-signZMI pk issuer t attrs = Certificate{..}
+signZMI :: PrivKey -> String -> UTCTime -> ZoneAttrs -> String -> Certificate
+signZMI pk issuer t attrs path = 
+    Certificate{..}
     where
     ct_id = issuer ++ "_" ++ (show tstamp)
     ct_sig = L.unpack $ R.sign pk (L.pack serialized)
     ct_create = tstamp
     tstamp = timeToTimestamp t
-    serialized = (serialize attrs)
+    serialized = (serialize path)
+              ++ (serialize attrs)
               ++ (serialize ct_id)
               ++ (serialize ct_create)
+        `myTrace`
+        ("signZMI " ++ path ++ " " ++ (show attrs))
 
 signZone :: String -> UTCTime -> PrivKey -> Int -> String -> PubKey -> ZoneCert
 signZone issuer t pk zc_level zc_name zc_pubkey = ZoneCert{..}
@@ -83,3 +96,9 @@ instance Hashable ZoneInfo where
 instance Hashable (String, ZoneInfo) where
     mkserial (s, zi) = (serialize s) ++ (mkserial zi)
     getsig (_, zi) = getsig zi
+
+instance Hashable a => Hashable (Maybe a) where
+    mkserial (Just x) = mkserial x
+    mkserial Nothing = []
+    getsig (Just x) = getsig x
+    getsig Nothing = []

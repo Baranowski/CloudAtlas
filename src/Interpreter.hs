@@ -34,7 +34,8 @@ performQueries z@(ZoneS attribs children) = do
         let filtered = (M.filterWithKey isSpecial attrs)
         t <- gets snd
         contactAttrs <- singleQuery newKids contactQ
-        let computed = ("freshness", Atime $ Just t):contactAttrs
+        cardAttrs <- singleQuery newKids cardQ
+        let computed = ("freshness", Atime $ Just t):(contactAttrs ++ cardAttrs)
         let specials = filtered `M.union` (M.fromList computed)
         return specials
         where
@@ -45,6 +46,7 @@ performQueries z@(ZoneS attribs children) = do
                                  , "level"
                                  ]
     contactQ = QAT [Qsel (Eapp "random" [Eint 3, Eapp "unfold" [Evar "contacts"]]) "contacts"] Nothing []
+    cardQ = QAT [Qsel (Eapp "sum" [Evar "cardinality"]) "cardinality"] Nothing []
     singleQuery newKids q = do
         res <- lift $ runErrorT $ runReaderT (performQ q) newKids
         case res of

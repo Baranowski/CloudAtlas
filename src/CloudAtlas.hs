@@ -8,6 +8,7 @@ import System.Random
 import qualified Data.Map as M
 import Data.Time.Clock
 import Data.List
+import Data.Maybe
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad.Reader
@@ -27,6 +28,7 @@ import ServerConfig
 import Listener
 import Security
 import Utils
+import SecData
 
 panic msg = do
     hPutStrLn stderr msg
@@ -51,7 +53,7 @@ main = do
         Right x -> return x
     t <- getCurrentTime
     let myname = intercalate "/" (c_path conf)
-    zones <- initZones myname t ((reverse $ c_path conf) `zip` keys)
+    zones <- initZones myname t ((c_path conf) `zip` (reverse keys))
     new_zones <- atomically $ newTVar zones
     contacts <- atomically $ newTVar []
     let env = Env { e_zones = new_zones
@@ -64,27 +66,37 @@ main = do
     forkIO $ (runErrorT $ runReaderT purger env) >> (return ())
     Listener.listen env
 
-initZones myname t l = go l []
+initZones :: String -> UTCTime -> [(String, (Maybe PubKey, Maybe PrivKey, Maybe ZoneCert))] -> IO Zone
+initZones myname t l = go "" l
     where
-    go ((n,(caK,prvK,zc)):xs) kids = do
+    go :: String -> [(String,(Maybe PubKey, Maybe PrivKey, Maybe ZoneCert))] -> IO Zone
+    go sp ((n,(caK,prvK,zc)):xs) = do
+        let spath = sp
+                 ++ (if (not $ null sp) && ((last sp) == '/')
+                        then ""
+                        else "/")
+                 ++ n
+        z_kids <- case xs of
+            x:_ -> (:[]) <$> (go spath xs)
+            _ -> return []
+        let zi_cert = (\pk -> signZMI pk myname t zi_attrs spath) <$> prvK
+        let info = ZoneInfo{..}
         z_info <- atomically $ newTVar info
-        let z = Zone{..}
-        if null xs
-            then return z
-            else go xs [z]
+        return Zone{..}
         where
-        z_kids = kids
         z_kca = caK
-        z_kpriv = Just prvK
-        info = ZoneInfo{..}
+        z_kpriv = prvK
         zi_zc = zc
         zi_attrs = M.fromList
-            [ ("name", if null xs
+            [ ("name", if null n
                             then Astr Nothing
                             else Astr $ Just n)
             , ("timestamp", Atime $ Just t)
+            , ("freshness", Atime $ Just t)
+            , ("cardinality", Aint $ if null xs
+                                        then Just 1
+                                        else Nothing)
             ]
-        zi_cert = signZMI prvK myname t zi_attrs
 
 purger = do
     delay <- asks $ c_p_freq . e_conf
@@ -140,7 +152,7 @@ queries = do
         z <- lift $ readTVar zTv
         zS <- lift $ zoneTvarToS z
         let ((newZS, errs),_) = runIdentity $ runStateT (runWriterT $ performQueries zS) (g,now)
-        newZ <- lift $ updateZones myname now z newZS
+        newZ <- lift $ updateZones "" myname now z newZS
         lift $ writeTVar zTv newZ
         return errs
     liftIO $ mapM (hPutStrLn stderr) errs
@@ -148,31 +160,41 @@ queries = do
     liftIO $ threadDelay delay
     queries
 
-updateZones :: String -> UTCTime -> Zone -> ZoneS -> STM Zone
-updateZones issuer t oldZ zs = 
-    case z_kpriv oldZ of
-        Nothing -> return oldZ
-        Just pk -> do
+updateZones :: String -> String -> UTCTime -> Zone -> ZoneS -> STM Zone
+updateZones sp issuer t oldZ zs = 
+    if (z_kpriv oldZ == Nothing) && (nameMb /= Nothing)
+        then return oldZ
+        else do
             newKids <- concatMapM (findMatchAndUpdate
                                         (zs_kids zs))
                                   (z_kids oldZ)
             oldInfo <- readTVar (z_info oldZ)
             let newInfo = oldInfo{ zi_attrs = newAttrs
-                                 , zi_cert  = newCert pk
+                                 , zi_cert  = newCert <$> (z_kpriv oldZ)
                                  }
             newInfoTV <- newTVar newInfo
             return oldZ{ z_kids = newKids
                        , z_info = newInfoTV
                        }
     where
-    newAttrs = zs_attrs zs
-    newCert pk = signZMI pk issuer t newAttrs
+    newSP = sp
+         ++ (if (not $ null sp) && ((last sp) == '/')
+                then ""
+                else "/")
+         ++ case nameMb of
+            Nothing -> ""
+            Just x -> x
+    newAttrs = M.insert "owner"
+                        (Astr $ Just issuer)
+                        (zs_attrs zs)
+    Just (Astr nameMb) = M.lookup "name" newAttrs
+    newCert pk = signZMI pk issuer t newAttrs newSP
     findMatchAndUpdate :: [ZoneS] -> Zone -> STM [Zone]
     findMatchAndUpdate zss z = do
         attrs <- zi_attrs <$> (readTVar $ z_info z)
         let onlyzs = filter (matchName (M.lookup "name" attrs)) zss
         case onlyzs of
-            [x] -> (:[]) <$> (updateZones issuer t z x)
+            [x] -> (:[]) <$> (updateZones newSP issuer t z x)
             _ -> return []
     matchName :: Maybe Attribute -> ZoneS -> Bool
     matchName attrMb zs = (M.lookup "name" (zs_attrs zs))==attrMb

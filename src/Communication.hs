@@ -61,8 +61,10 @@ instance Serializable a => Serializable (Maybe a) where
         return (Just res, xs)
     deserialize _ = fail "Unrecognized Maybe serialization"
 
-instance (Serializable a, Serializable b, Ord a) => Serializable (M.Map a b) where
-    serialize = serialize . M.toAscList
+instance Serializable ZoneAttrs where
+    serialize = serialize
+              . M.toAscList
+              . (M.filter $ not . (sameType $ Aquery Nothing))
     deserialize xs = do
         (l, xs) <- deserialize xs
         return (M.fromList l, xs)
