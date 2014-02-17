@@ -11,6 +11,7 @@ import Network.Socket hiding (recvFrom, sendTo)
 
 import Zones
 import SecData
+import Attributes
 
 data GossipStrategy = RoundRobin | ExpRR | Random | ExpRandom
 

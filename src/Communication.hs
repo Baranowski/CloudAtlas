@@ -16,6 +16,7 @@ import Zones
 import QAT
 import Parser
 import SecData
+import Attributes
 
 type CommMonad res = (ErrorT String Identity) res
 generalizeId m = return (runIdentity m)
@@ -51,6 +52,11 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d) => Ser
     deserialize xs = do
         (((pA,pB),(pC,pD)), rest) <- deserialize xs
         return ((pA, pB, pC, pD), rest)
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e) => Serializable (a, b, c, d, e) where
+    serialize (pA, pB, pC, pD, pE) = serialize ((pA,pB),(pC,pD,pE))
+    deserialize xs = do
+        (((pA,pB),(pC,pD,pE)), rest) <- deserialize xs
+        return ((pA, pB, pC, pD, pE), rest)
 
 instance Serializable a => Serializable (Maybe a) where
     serialize Nothing = [0]
@@ -278,10 +284,10 @@ instance Serializable QAT where
         return (q, xs)
 
 instance Serializable ZoneInfo where
-    serialize (ZoneInfo za cert zc) = serialize (za, cert, zc)
+    serialize (ZoneInfo za cert zc qc) = serialize (za, cert, zc, qc)
     deserialize xs = do
-        ((za, cert, zc), xs) <- deserialize xs
-        return (ZoneInfo za cert zc, xs)
+        ((za, cert, zc, qc), xs) <- deserialize xs
+        return (ZoneInfo za cert zc qc, xs)
 
 instance Serializable Certificate where
     serialize (Certificate id cr sig) = serialize (id, cr, sig)
@@ -294,6 +300,24 @@ instance Serializable ZoneCert where
     deserialize xs = do
         ((lev, nm, pk, cert), xs) <- deserialize xs
         return (ZoneCert lev nm pk cert, xs)
+
+instance Serializable FeedCert where
+    serialize (FeedCert as cert cc) = serialize (as,cert,cc)
+    deserialize xs = do
+        ((as,cert,cc), xs) <- deserialize xs
+        return (FeedCert as cert cc, xs)
+
+instance Serializable ClientCert where
+    serialize (ClientCert au pk ct zs as) = serialize (au,pk,ct,zs,as)
+    deserialize xs = do
+        ((au,pk,ct,zs,as), xs) <- deserialize xs
+        return (ClientCert au pk ct zs as, xs)
+
+instance Serializable QueryCert where
+    serialize (QueryCert c n mi ma ce cc) = serialize ((c,n,mi),(ma,ce,cc))
+    deserialize xs = do
+        (((c,n,mi),(ma,ce,cc)), xs) <- deserialize xs
+        return (QueryCert c n mi ma ce cc, xs)
 
 instance Serializable PubKey where
     serialize = serialize . show
@@ -311,8 +335,8 @@ data RemoteCall
     = SetContacts [Contact]
     | GetBagOfZones
     | GetZoneAttrs String
-    | SetZoneAttrs [(String, Attribute)]
-    | InstallQuery {iq_path:: String, iq_name::String, iq_query::String}
+    | SetZoneAttrs FeedCert
+    | InstallQuery QueryCert
     | UninstallQuery {uq_path:: String, uq_name::String}
     deriving (Show)
 
@@ -321,7 +345,7 @@ instance Serializable RemoteCall where
     serialize (GetBagOfZones) = [2]
     serialize (GetZoneAttrs s) = 3:(serialize s)
     serialize (SetZoneAttrs l) = 4:(serialize l)
-    serialize (InstallQuery p n q) = 5:(serialize (p,n,q))
+    serialize (InstallQuery c) = 5:(serialize c)
     serialize (UninstallQuery p n) = 6:(serialize (p,n))
 
     deserialize (1:xs) = do
@@ -336,8 +360,8 @@ instance Serializable RemoteCall where
         (l, xs) <- deserialize xs
         return (SetZoneAttrs l, xs)
     deserialize (5:xs) = do
-        ((p,n,q), xs) <- deserialize xs
-        return (InstallQuery p n q, xs)
+        (c, xs) <- deserialize xs
+        return (InstallQuery c, xs)
     deserialize (6:xs) = do
         ((p,n), xs) <- deserialize xs
         return (UninstallQuery p n, xs)

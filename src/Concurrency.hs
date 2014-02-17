@@ -12,6 +12,7 @@ import qualified Data.Map as M
 
 import ServerConfig
 import Zones
+import Attributes
 
 type StmStack m a = ReaderT Env (ErrorT String m) a
 -- TODO: error w srodku powinien powodowac rollback

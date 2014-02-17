@@ -1,4 +1,4 @@
-module Listener(listen) where
+module Listener(listen,rmiPerform) where
 
 import Control.Concurrent
 import Control.Monad.Error
@@ -11,6 +11,7 @@ import Data.List.Split
 import qualified Data.Map as M
 import Data.Time.Clock
 import Data.Word
+import Data.Function
 import Network.Socket hiding (recvFrom, sendTo, listen)
 import Network.Socket.ByteString
 import System.IO
@@ -23,6 +24,8 @@ import Utils
 import Zones
 import Parser
 import Security
+import Attributes
+import SecData
 
 listen env = do
     sock <- socket AF_INET Datagram 0
@@ -134,7 +137,7 @@ rmiPerform (GetZoneAttrs path) = do
         attrs <- zi_attrs <$> (myRead $ z_info z)
         return $ M.toList attrs
     return $ RmiZoneInfo res
-rmiPerform (SetZoneAttrs attrs) = do
+rmiPerform (SetZoneAttrs fc) = do
     t <- liftIO $ getCurrentTime
     embedSTM $ do
         path <- asks $ c_path . e_conf
@@ -145,7 +148,7 @@ rmiPerform (SetZoneAttrs attrs) = do
                 Nothing -> fail "Don't have private key"
         oldInfo <- myRead (z_info z)
         let oldAttrs = zi_attrs oldInfo
-        let newAttrs = (M.fromList attrs) `M.union` oldAttrs
+        let newAttrs = (M.fromList $ fc_attrs fc) `M.union` oldAttrs
         let freshAttrs = M.insert "freshness" (Atime $ Just t) newAttrs
         myWrite (z_info z) oldInfo{zi_attrs=freshAttrs
                                   ,zi_cert =Just $ signZMI
@@ -160,19 +163,29 @@ rmiPerform (SetContacts cSs) = do
     csTvar <- asks e_contacts
     embedSTM $ myWrite csTvar cSs
     return RmiOk
-rmiPerform (InstallQuery path name query) = do
-    case parseSingle query of
-        Left err -> return $ RmiErr $ show err
-        Right q -> actuallyInstall path name q
+rmiPerform (InstallQuery qc) = do
+    forM [(qc_minL qc)..(qc_maxL qc)] installAt
+    return RmiOk
     where
-    actuallyInstall path name q = embedSTM $ do
-        zs <- matchingZones_stm path
-        forM_ zs (go name q)
-        return RmiOk
-    go name q z = do
-        when (null $ z_kids z) $ fail "Cannot install query in a lowest-level zone"
-        info <- myRead (z_info z)
-        myWrite (z_info z) info{zi_attrs=M.insert name (Aquery $ Just q) (zi_attrs info)}
+    caPath = splitOn "/" $ cc_author $ qc_cc qc
+    installAt lvl = do
+        path <- asks $ (take (lvl+1)) . init . c_path . e_conf
+        when (not $ caPath `isPrefixOf` path)
+             (fail $ "Will not install query with CC from "
+                  ++ (cc_author $ qc_cc qc)
+                  ++ " at "
+                  ++ (intercalate "/" path))
+        embedSTM $ do
+            z <- getByPath_stm $ intercalate "/" path
+            oldInfo <- myRead $ z_info z
+            let filtered = filter ((flip comesLate) qc)
+                                  (zi_qcs oldInfo)
+            when (not $ any (comesLate qc) filtered) $ do
+                let newInfo = oldInfo{zi_qcs=qc:filtered}
+                myWrite (z_info z) newInfo
+      `catchError` (\_ -> return())
+    qca `comesLate` qcb = (((==) `on` qc_name) qca qcb)
+                       && (((>=) `on` (ct_create . qc_cert)) qca qcb)
 rmiPerform (UninstallQuery path name) = embedSTM $ do
     zs <- matchingZones_stm path
     forM_ zs (go name)

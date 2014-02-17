@@ -20,7 +20,6 @@ import Control.Monad.Morph
 import Control.Applicative
 
 import Concurrency
-import qualified Hardcoded
 import Zones
 import Interpreter
 import Gossip
@@ -29,6 +28,8 @@ import Listener
 import Security
 import Utils
 import SecData
+import Attributes
+import Communication
 
 panic msg = do
     hPutStrLn stderr msg
@@ -62,7 +63,9 @@ main = do
                   }
     runErrorT $ runReaderT setContact env
     forkIO $ runReaderT gossiping env
-    forkIO $ runReaderT queries env
+    forkIO $ do
+        runErrorT $ runReaderT queries env
+        return ()
     forkIO $ (runErrorT $ runReaderT purger env) >> (return ())
     Listener.listen env
 
@@ -143,19 +146,45 @@ setContact = embedSTM $ do
     info <- myRead (z_info z)
     myWrite (z_info z) info{zi_attrs=M.insert "contacts" (Aset 0 (Just [Acontact $ Just c])) (zi_attrs info)}
 
-queries = do
+propagateQueries :: ReaderT Env (ErrorT String IO) ()
+propagateQueries = do
+    zTv <- asks e_zones
+    qs <- embedSTM $ do
+        z <- myRead zTv
+        go z
+    forM_ qs tryToInstall
+    where
+    go z = do
+        kidsQs <- concatMapM go (z_kids z)
+        info <- myRead $ z_info z
+        return $ (zi_qcs info) ++ kidsQs
+    tryToInstall qc = do
+        verifyQC qc
+        rmiPerform (InstallQuery qc)
+        return ()
+      `catchError` (\_ -> return ())
+
+runQueries :: ReaderT Env (ErrorT String IO) ()
+runQueries = do
     zTv <- asks e_zones
     myname <- asks $ (intercalate "/") . c_path . e_conf
     g <- liftIO $ newStdGen
     now <- liftIO $ getCurrentTime
-    errs <- hoist atomically $ do
-        z <- lift $ readTVar zTv
-        zS <- lift $ zoneTvarToS z
+    errs <- embedSTM $ do
+        z <- myRead zTv
+        zS <- lift $ lift $ zoneTvarToS z
         let ((newZS, errs),_) = runIdentity $ runStateT (runWriterT $ performQueries zS) (g,now)
-        newZ <- lift $ updateZones "" myname now z newZS
-        lift $ writeTVar zTv newZ
+        newZ <- lift $ lift $ updateZones "" myname now z newZS
+        myWrite zTv newZ
         return errs
-    liftIO $ mapM (hPutStrLn stderr) errs
+    liftIO $ mapM_ (hPutStrLn stderr) errs
+
+queries :: ReaderT Env (ErrorT String IO) ()
+queries = do
+    do
+        propagateQueries
+        runQueries
+      `catchError` (liftIO . (hPutStrLn stderr))
     delay <- asks $ c_qu_fr . e_conf
     liftIO $ threadDelay delay
     queries
@@ -198,18 +227,3 @@ updateZones sp issuer t oldZ zs =
             _ -> return []
     matchName :: Maybe Attribute -> ZoneS -> Bool
     matchName attrMb zs = (M.lookup "name" (zs_attrs zs))==attrMb
-
-relevant now (n:ns) z =
-    ZoneS
-        (M.insert "freshness" (Atime $ Just now) (zs_attrs z))
-        newKids
-    where
-    newKids = if (zN == n)
-        then map (relevant now ns) (filter (nMatch ns) $ zs_kids z)
-        else []
-    zN = case (M.lookup "name" (zs_attrs z)) of
-        Just (Astr (Just x)) -> x
-        _ -> ""
-    nMatch (n2:nss) z = zNameMbe == (Just (Astr (Just n2)))
-        where
-        zNameMbe = M.lookup "name" (zs_attrs z)

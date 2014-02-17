@@ -16,19 +16,19 @@ import Text.Regex.Posix
 import Zones
 import QAT
 import Utils
+import Attributes
 
 type IerSt = (StdGen, UTCTime)
 performQueries :: ZoneS -> WriterT [String] (StateT IerSt Identity) ZoneS
-performQueries z@(ZoneS attribs []) = return z
-performQueries z@(ZoneS attribs children) = do
+performQueries z@(ZoneS attribs [] _) = return z
+performQueries z@(ZoneS attribs children qs) = do
     newKids <- mapM performQueries children
     let atL = M.elems attribs
-    let queries = map getQuery (filter isNonNullQuery atL)
-    newAttrsNested <- mapM (singleQuery newKids) queries
+    newAttrsNested <- mapM (singleQuery newKids) qs
     let newAttrs = concat newAttrsNested
     specialAttrs <- special attribs newKids
     let updatedAttrs = specialAttrs `M.union` (M.fromList newAttrs)
-    return $ ZoneS updatedAttrs newKids
+    return $ ZoneS updatedAttrs newKids qs
     where
     special attrs newKids = do
         let filtered = (M.filterWithKey isSpecial attrs)

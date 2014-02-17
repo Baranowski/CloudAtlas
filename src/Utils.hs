@@ -9,6 +9,7 @@ import Control.Monad
 import Debug.HTrace(htrace)
 
 import Zones
+import Attributes
 
 myCurrentTime = do
     t <- getCurrentTime

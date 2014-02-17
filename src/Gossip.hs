@@ -20,6 +20,7 @@ import Network
 import ServerConfig
 import Zones
 import Utils
+import Attributes
 
 data GossipSt = GossipSt { level_st :: Int
                          }

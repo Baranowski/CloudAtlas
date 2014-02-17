@@ -8,6 +8,8 @@ import Crypto.Random
 import qualified Data.ByteString.Lazy as L
 import Control.Monad.Error
 import Control.Monad.Reader
+import Data.List.Split
+import Data.List
 
 import Concurrency
 import ServerConfig
@@ -15,13 +17,11 @@ import Zones
 import Communication
 import SecData
 import Utils
+import Attributes
 
 verifyMsg :: Msg -> ReaderT Env (ErrorT String IO) ()
-verifyMsg z@(ZInfo _ p zi) = do
-    z <- embedSTM $ getByPath_stm $ parentOf p 
-    pk <- case z_kca z of
-        Just pk -> return pk
-        _ -> fail "CA public key unknown"
+verifyMsg (ZInfo _ p zi) = do
+    pk <- getCaKey p
     zc <- case zi_zc zi of
         Just x -> return x
         _ -> fail "Received ZMI without Zone Certificate"
@@ -33,14 +33,93 @@ verifyMsg z@(ZInfo _ p zi) = do
         "Verifying ZMI Certificate"
   `addTrace`
   ("Verifying ZInfo for " ++ p)
-
+verifyMsg (RmiReq _ (SetZoneAttrs fc)) = do
+    verifyCC $ fc_cc fc
+    verify (cc_pubkey $ fc_cc fc) fc
+    let allowedAttrs = cc_attrs $ fc_cc fc
+    when (not $ null allowedAttrs)
+         (mapM_ (attrIn allowedAttrs) (fc_attrs fc))
+    where
+    attrIn allowedAttrs (n,_) =
+        when (not $ n `elem` allowedAttrs)
+             (fail $ "Trying to update field " ++ n)
+verifyMsg (RmiReq _ (InstallQuery qc)) = verifyQC qc
 verifyMsg _ = return ()
+
+verifyQC qc = do
+    verifyCC $ qc_cc qc
+    verify (cc_pubkey $ qc_cc qc) qc
+verifyCC cc = do
+    let authPath = splitOn "/" (cc_author cc)
+    myPath <- asks $ c_path . e_conf
+    when (not $ authPath `isPrefixOf` myPath)
+         (fail $ "Client Certificate signed by an unknown CA")
+    pk <- getCaKey $ cc_author cc
+    verify pk cc
+
+getCaKey path = do
+    z <- embedSTM $ getByPath_stm path
+    case z_kca z of
+        Just pk -> return pk
+        _ -> fail "CA public key unknown"
 
 generateKeys :: IO (PrivKey,PubKey)
 generateKeys = do
     g::SystemRandom <- newGenIO
     let (pub,priv,_) = R.generateKeyPair g 1024
     return (priv,pub)
+
+class Hashable a where
+    mkserial :: a -> [Word8]
+    getsig   :: a -> Signature
+    verify   :: PubKey -> a -> ReaderT Env (ErrorT String IO) ()
+    verify pk x = do
+        case R.verify pk (L.pack $ mkserial x) (L.pack $ getsig x) of
+            False -> fail "Signature does not match"
+            True -> return ()
+
+instance Hashable Certificate where
+    mkserial c = serialize (ct_id c, ct_create c)
+    getsig     = ct_sig
+
+instance Hashable ClientCert where
+    mkserial cc = (serialize (cc_author cc, cc_pubkey cc, cc_zones cc, cc_attrs cc)) ++ (mkserial $ cc_cert cc)
+    getsig = getsig . cc_cert
+
+instance Hashable QueryCert where
+    mkserial qc = (serialize (qc_code qc, qc_name qc, qc_minL qc, qc_maxL qc)) ++ (mkserial $ qc_cert qc)
+    getsig = getsig . qc_cert
+
+instance Hashable FeedCert where
+    mkserial fc = (serialize $ fc_attrs fc) ++ (mkserial $ fc_cert fc)
+    getsig = getsig . fc_cert
+
+instance Hashable ZoneCert where
+    mkserial zc = (mkserial $ zc_cert zc)
+               ++ (serialize (zc_level zc
+                             , zc_name zc
+                             , zc_pubkey zc
+                             ))
+    getsig = getsig . zc_cert
+
+signZone :: String -> UTCTime -> PrivKey -> Int -> String -> PubKey -> ZoneCert
+signZone issuer t pk zc_level zc_name zc_pubkey = ZoneCert{..}
+    where
+    zc_cert = Certificate{..}
+    ct_id = issuer ++ "_" ++ (show ct_create)
+    ct_create = timeToTimestamp t
+    ct_sig = L.unpack $ R.sign pk (L.pack serialized)
+    serialized = serialize (ct_id, ct_create)
+              ++ serialize (zc_level, zc_name, zc_pubkey)
+
+instance Hashable ZoneInfo where
+    mkserial zi = (serialize $ zi_attrs zi)
+               ++ (mkserial $ zi_cert zi)
+    getsig = getsig . zi_cert
+
+instance Hashable (String, ZoneInfo) where
+    mkserial (s, zi) = (serialize s) ++ (mkserial zi)
+    getsig (_, zi) = getsig zi
 
 signZMI :: PrivKey -> String -> UTCTime -> ZoneAttrs -> String -> Certificate
 signZMI pk issuer t attrs path = 
@@ -56,46 +135,6 @@ signZMI pk issuer t attrs path =
               ++ (serialize ct_create)
         `myTrace`
         ("signZMI " ++ path ++ " " ++ (show attrs))
-
-signZone :: String -> UTCTime -> PrivKey -> Int -> String -> PubKey -> ZoneCert
-signZone issuer t pk zc_level zc_name zc_pubkey = ZoneCert{..}
-    where
-    zc_cert = Certificate{..}
-    ct_id = issuer ++ "_" ++ (show ct_create)
-    ct_create = timeToTimestamp t
-    ct_sig = L.unpack $ R.sign pk (L.pack serialized)
-    serialized = serialize (ct_id, ct_create)
-              ++ serialize (zc_level, zc_name, zc_pubkey)
-
-class Hashable a where
-    mkserial :: a -> [Word8]
-    getsig   :: a -> Signature
-    verify   :: PubKey -> a -> ReaderT Env (ErrorT String IO) ()
-    verify pk x = do
-        case R.verify pk (L.pack $ mkserial x) (L.pack $ getsig x) of
-            False -> fail "Signature does not match"
-            True -> return ()
-
-instance Hashable Certificate where
-    mkserial c = serialize (ct_id c, ct_create c)
-    getsig     = ct_sig
-
-instance Hashable ZoneCert where
-    mkserial zc = (mkserial $ zc_cert zc)
-               ++ (serialize (zc_level zc
-                             , zc_name zc
-                             , zc_pubkey zc
-                             ))
-    getsig = getsig . zc_cert
-
-instance Hashable ZoneInfo where
-    mkserial zi = (serialize $ zi_attrs zi)
-               ++ (mkserial $ zi_cert zi)
-    getsig = getsig . zi_cert
-
-instance Hashable (String, ZoneInfo) where
-    mkserial (s, zi) = (serialize s) ++ (mkserial zi)
-    getsig (_, zi) = getsig zi
 
 instance Hashable a => Hashable (Maybe a) where
     mkserial (Just x) = mkserial x
