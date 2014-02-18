@@ -1,1 +1,1 @@
-install_query * s_num_processes SELECT sum(num_processes) AS num_processes
+install_query num_processes 0 2 SELECT sum(num_processes) AS num_processes

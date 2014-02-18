@@ -132,7 +132,11 @@ rmiPerform (GetZoneAttrs path) = do
     res <- embedSTM $ do
         z <- getByPath_stm path
         attrs <- zi_attrs <$> (myRead $ z_info z)
-        return $ M.toList attrs
+        qs <- zi_qcs <$> (myRead $ z_info z)
+        let qL = (\qc -> ('&':(qc_name qc)
+                         ,Aquery $ Just $ qc_code qc)
+                 ) <$> qs
+        return $ (M.toList attrs) ++ qL
     return $ RmiZoneInfo res
 rmiPerform (SetZoneAttrs fc) = do
     t <- liftIO $ getCurrentTime
@@ -164,9 +168,9 @@ rmiPerform (InstallQuery qc) = do
     forM [(qc_minL qc)..(qc_maxL qc)] installAt
     return RmiOk
     where
-    caPath = splitOn "/" $ cc_author $ qc_cc qc
+    caPath = pathStoL $ cc_author $ qc_cc qc
     installAt lvl = do
-        path <- asks $ (take (lvl+1)) . init . c_path . e_conf
+        path <- asks $ (take (lvl+1)) . c_path . e_conf
         when (not $ caPath `isPrefixOf` path)
              (fail $ "Will not install query with CC from "
                   ++ (cc_author $ qc_cc qc)
