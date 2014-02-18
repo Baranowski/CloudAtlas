@@ -93,10 +93,7 @@ processMsg rZ@(ZInfo (t1a,t1b,t2b) p zi) client = do
         let localTStamp = timeToTimestamp f
         (adjusted, newAttrs) <- adjAttrsFromList ts t2a (zi_attrs zi)
         when (adjusted > localTStamp) $ do
-            oldInfo <- myRead (z_info z)
-            let oldAttrs = zi_attrs oldInfo
-            let queries = M.filter (sameType (Aquery Nothing)) oldAttrs
-            myWrite (z_info z) oldInfo{zi_attrs=(newAttrs `M.union` queries)}
+            myWrite (z_info z) zi
     verifyFreshness t2a (ZInfo ts p zi) Nothing = do
         myPath <- asks $ c_path . e_conf
         when ((init (splitOn "/" p)) `isPrefixOf` myPath) $ do
@@ -214,8 +211,12 @@ mkFreshness = embedSTM $ do
             let newPath = path ++ [n]
             (Atime (Just f)) <- reqTyped_stm "freshness" (Atime Nothing) z
             res <- mapM (go newPath) (z_kids z)
+            myPath <- asks $ c_path . e_conf
+            let fr = if newPath `isPrefixOf` myPath
+                    then eternity
+                    else f
             let sPath = intercalate "/" newPath
-            return $ (sPath, timeToTimestamp f):(concat res)
+            return $ (sPath, timeToTimestamp fr):(concat res)
 
 sendUpdate client (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
     l1N <- mapM cmpFreshness fr
@@ -226,6 +227,7 @@ sendUpdate client (Freshness fr) times@(t1a,t1b,t2b,t2a) = do
     sendInfo (p, l) = do
         t3a <- liftIO $ myCurrentTime
         sendMsg client (ZInfo (t2b,t2a,t3a) p l)
+    cmpFreshness ("", remoteTStamp) = return []
     cmpFreshness (path, remoteTStamp) = do
         embedSTM $ do
             zMbe <- lookupPath_stm path

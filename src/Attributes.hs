@@ -58,6 +58,8 @@ time_format = "%Y/%m/%d %H:%M:%S%Q"
 timeFromStr s = readTime defaultTimeLocale time_format s
 epoch :: UTCTime
 epoch = timeFromStr "2000/01/01 00:00:00.000"
+eternity :: UTCTime
+eternity = timeFromStr "2100/01/01 00:00:00.000"
 
 timeToTimestamp ::   UTCTime -> Integer
 timeToTimestamp t = round $ (utcTimeToPOSIXSeconds t) * dPrecision

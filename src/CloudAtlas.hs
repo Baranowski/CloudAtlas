@@ -83,6 +83,7 @@ initZones myname t l = go "" l
             x:_ -> (:[]) <$> (go spath xs)
             _ -> return []
         let zi_cert = (\pk -> signZMI pk myname t zi_attrs spath) <$> prvK
+        let zi_qcs = []
         let info = ZoneInfo{..}
         z_info <- atomically $ newTVar info
         return Zone{..}

@@ -20,7 +20,7 @@ unknown = do
     hPutStrLn stderr $ "    " ++ prog ++ " [database dir] --create-zone [zone name]"
     hPutStrLn stderr $ "    " ++ prog ++ " [database dir] --init [prefix]"
     hPutStrLn stderr $ "    " ++ prog ++ " [database dir] --client-cert [allowed zones] [allowed attributes]"
-    hPutStrLn stderr $ "        [allowed zones] and [allowed attributes] might each be an empty string or a comma-separated list"
+    hPutStrLn stderr $ "        [allowed zones] and [allowed attributes] might each be \"*\" or a comma-separated list"
     exitFailure
 
 main = do
@@ -35,7 +35,9 @@ main = do
 clientCert dbDir zsS asS = do
     (priv,cc_pubkey) <- generateKeys
     prefix <- readFile $ dbDir ++ "/prefix"
-    let [zs,as] = map (splitOn ",") [zsS,asS]
+    let [zs,as] = (flip map) [zsS,asS] (\s -> case s of
+                    "*" -> []
+                    s -> splitOn "," s)
     let cc_zones = map (splitOn "/") zs
     let cc_attrs = as
     let cc_author = case prefix of

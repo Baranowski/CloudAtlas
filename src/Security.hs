@@ -22,7 +22,7 @@ import QAT
 
 verifyMsg :: Msg -> ReaderT Env (ErrorT String IO) ()
 verifyMsg (ZInfo _ p zi) = do
-    pk <- getCaKey p
+    pk <- getCaKey (parentOf p)
     zc <- case zi_zc zi of
         Just x -> return x
         _ -> fail "Received ZMI without Zone Certificate"
@@ -62,7 +62,7 @@ verifyQC qc = do
         when (not $ n `elem` allowed)
              (fail $ "Query would update protected field: " ++ n)
 verifyCC cc = do
-    let authPath = splitOn "/" (cc_author cc)
+    let authPath = pathStoL (cc_author cc)
     myPath <- asks $ c_path . e_conf
     when (not $ authPath `isPrefixOf` myPath)
          (fail $ "Client Certificate signed by an unknown CA")

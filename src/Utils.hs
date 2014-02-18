@@ -32,5 +32,8 @@ myTrace x s =
         then htrace s x
         else x
 
-
-
+pathStoL s = splitOn "/" fixedS
+    where
+    fixedS = case s of
+        "/" -> ""
+        _ -> s
