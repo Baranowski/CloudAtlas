@@ -86,6 +86,16 @@ instance Hashable ClientCert where
     mkserial cc = (serialize (cc_author cc, cc_pubkey cc, cc_zones cc, cc_attrs cc)) ++ (mkserial $ cc_cert cc)
     getsig = getsig . cc_cert
 
+signCC :: PrivKey -> String -> PubKey -> [[String]] -> [String] -> UTCTime -> Certificate
+signCC priv auth pub zones attrs t = Certificate{..}
+    where
+    ct_id = auth ++ "_CA_" ++ (show ct_create)
+    ct_create = timeToTimestamp t
+    ct_sig = L.unpack $ R.sign priv (L.pack serialized)
+    serialized = serialize ( (auth, pub, zones, attrs)
+                           , (ct_id, ct_create)
+                           )
+
 instance Hashable QueryCert where
     mkserial qc = (serialize (qc_code qc, qc_name qc, qc_minL qc, qc_maxL qc)) ++ (mkserial $ qc_cert qc)
     getsig = getsig . qc_cert
