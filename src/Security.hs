@@ -18,6 +18,7 @@ import Communication
 import SecData
 import Utils
 import Attributes
+import QAT
 
 verifyMsg :: Msg -> ReaderT Env (ErrorT String IO) ()
 verifyMsg (ZInfo _ p zi) = do
@@ -42,18 +43,32 @@ verifyMsg (RmiReq _ (SetZoneAttrs fc)) = do
     where
     attrIn allowedAttrs (n,_) =
         when (not $ n `elem` allowedAttrs)
-             (fail $ "Trying to update field " ++ n)
+             (fail $ "Trying to update protected field " ++ n)
 verifyMsg (RmiReq _ (InstallQuery qc)) = verifyQC qc
 verifyMsg _ = return ()
 
 verifyQC qc = do
     verifyCC $ qc_cc qc
     verify (cc_pubkey $ qc_cc qc) qc
+    verifyAttrs
+    where
+    verifyAttrs = do
+        let (QAT sels _ _ ) = qc_code qc
+        let attrs = map (\(Qsel _ n) -> n) sels
+        when (not $ null $ cc_attrs $ qc_cc qc)
+             (forM_ attrs
+                    (withinAllowed $ cc_attrs $ qc_cc qc))
+    withinAllowed allowed n = do
+        when (not $ n `elem` allowed)
+             (fail $ "Query would update protected field: " ++ n)
 verifyCC cc = do
     let authPath = splitOn "/" (cc_author cc)
     myPath <- asks $ c_path . e_conf
     when (not $ authPath `isPrefixOf` myPath)
          (fail $ "Client Certificate signed by an unknown CA")
+    when ( (not $ null $ cc_zones cc)
+        && (not $ myPath `elem` (cc_zones cc)) )
+         (fail $ "This zone is protected")
     pk <- getCaKey $ cc_author cc
     verify pk cc
 
@@ -100,9 +115,27 @@ instance Hashable QueryCert where
     mkserial qc = (serialize (qc_code qc, qc_name qc, qc_minL qc, qc_maxL qc)) ++ (mkserial $ qc_cert qc)
     getsig = getsig . qc_cert
 
+signQC :: PrivKey -> QAT -> String -> Int -> Int -> UTCTime -> Certificate
+signQC priv q n minL maxL t = Certificate{..}
+    where
+    ct_id = "Client_" ++ (show ct_create)
+    ct_create = timeToTimestamp t
+    ct_sig = L.unpack $ R.sign priv (L.pack serialized)
+    serialized = serialize ( (q, n, minL, maxL)
+                           , (ct_id, ct_create)
+                           )
+
 instance Hashable FeedCert where
     mkserial fc = (serialize $ fc_attrs fc) ++ (mkserial $ fc_cert fc)
     getsig = getsig . fc_cert
+
+signFC :: PrivKey -> [(String,Attribute)] -> UTCTime -> Certificate
+signFC priv attrs t = Certificate{..}
+    where
+    ct_id = "Client_" ++ (show ct_create)
+    ct_create = timeToTimestamp t
+    ct_sig = L.unpack $ R.sign priv (L.pack serialized)
+    serialized = serialize (attrs, ct_id, ct_create)
 
 instance Hashable ZoneCert where
     mkserial zc = (mkserial $ zc_cert zc)

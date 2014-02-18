@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, RecordWildCards #-}
 module Main where
 
 import System.Environment
@@ -8,6 +8,7 @@ import System.Process
 import Data.List
 import Data.List.Split
 import Data.List.Utils
+import Data.Time.Clock
 import qualified Data.List.Utils as L
 import qualified Data.ConfigFile as C
 import Network.Socket hiding (recvFrom, sendTo)
@@ -19,29 +20,37 @@ import Control.Monad.Error
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Concurrent
+import Control.Applicative
 import qualified Data.ByteString as B
 import Text.Regex.Posix
 
 import Communication
 import Zones
 import Utils
+import Attributes
+import SecData
+import Security
+import Parser
 
 main = do
     args <- getArgs
     case args of
         ['-':_] -> unknown
         ["help"] -> unknown
-        [s] -> if ':' `elem` s
-                then interactive s
-                else daemon s
+        [certS,privS,s] -> do
+            cert <- read <$> (readFile certS)
+            priv <- read <$> (readFile privS)
+            if ':' `elem` s
+                then interactive cert priv s
+                else daemon cert priv s
         _ -> unknown
 
 unknown = do
     p <- getProgName
     hPutStrLn stderr "Usage: "
-    hPutStrLn stderr $ "   " ++ p ++ " <config file>"
+    hPutStrLn stderr $ "   " ++ p ++ " <client certificate> <private key> <config file>"
     hPutStrLn stderr $ "       For daemon mode"
-    hPutStrLn stderr $ "   " ++ p ++ " <host name>:<port>"
+    hPutStrLn stderr $ "   " ++ p ++ " <client certificate> <private key> <host name>:<port>"
     hPutStrLn stderr $ "       For interactive mode"
     exitFailure
 
@@ -75,7 +84,8 @@ data MyState = MSt { s_req_id :: Int
                    }
 
 
-daemon configPath = do
+daemon :: ClientCert -> PrivKey -> String -> IO ()
+daemon cert priv configPath = do
     conf <- readConfig configPath
     (sAddr, sock) <- openSocket (host_name conf) (port_name conf) 
     let initState = MSt { s_req_id = 0
@@ -86,7 +96,7 @@ daemon configPath = do
     return ()
     where
         loop = do
-            embedError singleIter
+            embedError $ singleIter cert priv
             uI <- asks updateInterval
             liftIO $ threadDelay uI
             loop
@@ -108,13 +118,18 @@ ioRunError m = do
             return ()
         Right x -> return x
 
-singleIter :: ReaderT Config (StateT MyState (ErrorT String IO)) ()
-singleIter = do
+singleIter :: ClientCert -> PrivKey -> ReaderT Config (StateT MyState (ErrorT String IO)) ()
+singleIter cert priv = do
     srv <- gets s_server
     sock <- gets s_socket
     id <- gets s_req_id
     newAttrs <- mapM findAttr attr_names
-    sendMsg srv sock $ RmiReq id $ SetZoneAttrs (concat newAttrs)
+    t <- liftIO $ getCurrentTime
+    let fc_attrs = concat newAttrs
+    let fc_cc = cert
+    let fc_cert = signFC priv fc_attrs t
+    let fc = FeedCert{..}
+    sendMsg srv sock $ RmiReq id (SetZoneAttrs fc)
     modify $ \x -> x{s_req_id = (id+1)}
     where
         attr_names = [ "cpu_load" 
@@ -196,7 +211,7 @@ openSocket hostS portS = do
     bindSocket sock (SockAddrInet 0 iNADDR_ANY)
     return (addrAddress servAddr, sock)
 
-interactive s = do
+interactive cert priv s = do
     Right (hostS, portS) <- runErrorT $ (parseContact s) `catchError` (lift . panic)
     (servAddr, sock) <- openSocket hostS portS
     res <- runErrorT (loop 1 servAddr sock)
@@ -211,7 +226,7 @@ interactive s = do
         liftIO $ hFlush stdout
         l <- liftIO $ getLine
         let cmd = splitOn " " l
-        newId <- process id serv sock cmd
+        newId <- process id serv sock cmd (cert,priv)
         loop newId serv sock
 
 getMsg sock = do
@@ -219,7 +234,7 @@ getMsg sock = do
     (hd, newMsg) <- hoist generalizeId $ readHeader (B.unpack mesg)
     hoist generalizeId $ deserializeMsg newMsg
 
-process id serv sock ["get_zones"] = do
+process id serv sock ["get_zones"] _ = do
     sendMsg serv sock (RmiReq id GetBagOfZones) 
     msg <- getMsg sock
     case msg of
@@ -227,7 +242,7 @@ process id serv sock ["get_zones"] = do
             liftIO $ zs `forM_` putStrLn
         x -> reportRmiResponse x
     return (id+1)
-process id serv sock ["zone", path] = do
+process id serv sock ["zone", path] _ = do
     sendMsg serv sock (RmiReq id $ GetZoneAttrs path)
     msg <- getMsg sock
     case msg of
@@ -237,36 +252,46 @@ process id serv sock ["zone", path] = do
     return (id+1)
     where
         showAttr (name, attr) = name ++ ": " ++ (printAType attr) ++ " = " ++ (printAVal attr)
-process id serv sock ("set_contacts":cs) = do
+process id serv sock ("set_contacts":cs) _ = do
     splitCs <- mapM parseContact cs
     sendMsg serv sock (RmiReq id $ SetContacts splitCs)
     msg <- getMsg sock
     reportRmiResponse msg
     return (id+1)
-process id serv sock ("install_query":path:attrName:querys) = do
+process id serv sock ("install_query":attrName:minLS:maxLS:querys) (cert,priv) = do
+    let qc_minL = read minLS
+    let qc_maxL = read maxLS
     let query = intercalate " " querys
-    sendMsg serv sock (RmiReq id $ InstallQuery path attrName query)
-    msg <- getMsg sock
-    reportRmiResponse msg
+    case parseSingle query of
+        Left pe -> liftIO $ hPutStrLn stderr (show pe)
+        Right qc_code -> do
+            let qc_name = attrName
+            t <- liftIO $ getCurrentTime
+            let qc_cert = signQC priv qc_code qc_name qc_minL qc_maxL t
+            let qc_cc = cert
+            let qc = QueryCert{..}
+            sendMsg serv sock (RmiReq id $ InstallQuery qc)
+            msg <- getMsg sock
+            reportRmiResponse msg
     return (id+1)
-process id serv sock ("uninstall_query":path:attrName:[]) = do
+process id serv sock ("uninstall_query":path:attrName:[]) _ = do
     sendMsg serv sock (RmiReq id $ UninstallQuery path attrName)
     msg <- getMsg sock
     reportRmiResponse msg
     return (id+1)
-process id serv sock ["quit"] = do
+process id serv sock ["quit"] _ = do
     liftIO $ sClose sock
     liftIO $ exitSuccess
     return id
-process id serv sock _ = do
+process id serv sock _ _ = do
     liftIO $ putStrLn "Unknown command. Use one of:"
     liftIO $ putStrLn " - get_zones   - to get a list of all zones"
     liftIO $ putStrLn " - zone <path> - to list all of zone's attributes"
     liftIO $ putStrLn " - set_contacts <host1:port1> [ <host2:port2> [ ... ] ]- to set fallback contacts for an agent"
     liftIO $ putStrLn ""
-    liftIO $ putStrLn " - install_query <zone> <query_name> <query> - to install a query in the specified zone"
-    liftIO $ putStrLn " - uninstall_query <zone> <query_name> - to uinstall a query from the specified zone"
-    liftIO $ putStrLn "   In the two commands above, <zone> might be '*' to denote all zones the agent belongs to"
+    liftIO $ putStrLn " - install_query <query_name> <min level> <max level> <query> - to install a query within spedified levels"
+{-    liftIO $ putStrLn " - uninstall_query <zone> <query_name> - to uinstall a query from the specified zone"
+    liftIO $ putStrLn "   In the two commands above, <zone> might be '*' to denote all zones the agent belongs to" -}
     liftIO $ putStrLn ""
     liftIO $ putStrLn " - quit"
     return id

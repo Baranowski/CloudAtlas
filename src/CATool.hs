@@ -20,12 +20,14 @@ unknown = do
     hPutStrLn stderr $ "    " ++ prog ++ " [database dir] --create-zone [zone name]"
     hPutStrLn stderr $ "    " ++ prog ++ " [database dir] --init [prefix]"
     hPutStrLn stderr $ "    " ++ prog ++ " [database dir] --client-cert [allowed zones] [allowed attributes]"
+    hPutStrLn stderr $ "        [allowed zones] and [allowed attributes] might each be an empty string or a comma-separated list"
     exitFailure
 
 main = do
     args <- getArgs
     case args of
         [dbDir,"--create-zone",zone_name] -> createZone dbDir zone_name
+        [dbDir,"--init"] -> initDB dbDir ""
         [dbDir,"--init",prefix] -> initDB dbDir prefix
         [dbDir,"--client-cert",allowed_zones,allowed_attrs] -> clientCert dbDir allowed_zones allowed_attrs
         _ -> unknown
