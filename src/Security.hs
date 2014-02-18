@@ -29,6 +29,8 @@ verifyMsg (ZInfo _ p zi) = do
     (verify pk zc)
         `addTrace`
         "Verifying ZoneCert"
+    when ((zc_name zc) /= (last $ pathStoL p))
+         (fail $ "Zone name does not match Zone Certificate")
     (verify (zc_pubkey $ zc) (p, zi))
         `addTrace`
         "Verifying ZMI Certificate"
